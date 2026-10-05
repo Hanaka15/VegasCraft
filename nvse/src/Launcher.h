@@ -3,6 +3,8 @@
 #include "PCH.h"
 
 #include <atomic>
+#include <filesystem>
+#include <string>
 
 namespace vegascraft::Launcher
 {
@@ -10,20 +12,20 @@ namespace vegascraft::Launcher
 	{
 		kOff = 0,
 		kStarting,
-		kSignIn,    // first run: Prism needs Microsoft account
+		kSignIn,
 		kRunning,
 		kNoLauncher,
 		kFailed,
 	};
 
+	void SetGameDirectory(std::filesystem::path dir);
 	Status GetStatus();
 	bool MinecraftRunning();
 
 	// Unpack Data/NVSE/Plugins/VegasCraft/VegasCraft-Minecraft.zip → %LOCALAPPDATA%\VegasCraft
-	// and start portable Prism (--launch VegasCraft). Under Proton this is still a Windows
-	// CreateProcess inside FNV's wineprefix, so Local\VegasCraft_v1 shared memory works.
+	// and CreateProcess portable Prism in this process's Wine/Proton prefix.
 	void StartMinecraft();
-
-	// Does not kill Prism/MC (they quit themselves); reserved for future cleanup.
 	void StopMinecraft();
+
+	void Logf(const char* fmt, ...);
 }

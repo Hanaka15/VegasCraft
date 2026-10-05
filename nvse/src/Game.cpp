@@ -11,11 +11,13 @@ namespace vegascraft
 
 	bool Game::Init()
 	{
-		if (!link_.Create()) {
-			return false;
+		if (!link_.IsOpen()) {
+			if (!link_.Create()) {
+				Launcher::Logf("shared-memory Create failed");
+				return false;
+			}
+			Launcher::Logf("shared-memory link created");
 		}
-		// Starts Windows Prism from Data/NVSE/Plugins/VegasCraft/VegasCraft-Minecraft.zip
-		// via CreateProcess — under Proton that stays in FNV's wineprefix.
 		Launcher::StartMinecraft();
 		return true;
 	}
