@@ -188,7 +188,8 @@ start_minecraft_first() {
 		export PROTON_USE_WOW64=1
 		"$proton" run "$PRISM_EXE" --launch VegasCraft >>"$LOG" 2>&1 || log "WARNING: proton Prism exit $?"
 	) &
-	disown || true
+	PRISM_BG_PID=$!
+	log "Prism starter pid $PRISM_BG_PID"
 
 	# Wait until javaw is up so wineserver is settled before FNV joins.
 	local i
@@ -205,6 +206,22 @@ start_minecraft_first() {
 	return 0
 }
 
+stop_vegas_minecraft() {
+	log "Stopping VegasCraft Prism/Minecraft"
+	# Wine PE processes + proton wrappers for this prefix only
+	pkill -f 'VegasCraft/Prism/prismlauncher\.exe' 2>/dev/null || true
+	pkill -f 'VegasCraft/Prism/.*/javaw\.exe' 2>/dev/null || true
+	pkill -f 'compatdata/22490/.*/prismlauncher' 2>/dev/null || true
+	if [[ -n "${PRISM_BG_PID:-}" ]] && kill -0 "$PRISM_BG_PID" 2>/dev/null; then
+		kill "$PRISM_BG_PID" 2>/dev/null || true
+		sleep 0.5
+		kill -9 "$PRISM_BG_PID" 2>/dev/null || true
+	fi
+}
+
+PRISM_BG_PID=""
+trap 'stop_vegas_minecraft' EXIT INT TERM
+
 start_minecraft_first || true
 
 cmd=("$@")
@@ -216,5 +233,13 @@ for i in "${!cmd[@]}"; do
 	esac
 done
 
-log "exec: ${cmd[*]}"
-exec "${cmd[@]}"
+log "run: ${cmd[*]}"
+# Do not exec — when FNV/Steam exits we must kill Prism or Steam stays "running"
+set +e
+"${cmd[@]}"
+rc=$?
+set -e
+log "Fallout/Steam command exited rc=$rc"
+stop_vegas_minecraft
+trap - EXIT INT TERM
+exit "$rc"
