@@ -1,0 +1,16 @@
+# Prefer MSCAPI Windows-PRNG so UUID/SecureRandom does not call
+# NetworkInterface.getAll() — that native path crashes on Wine < 9.3 (Proton 9.0).
+# Harmless on real Windows. Prefer Proton GE 10+ / Experimental (Wine >= 9.3) long-term.
+security.provider.1=SunMSCAPI
+security.provider.2=SUN
+security.provider.3=SunRsaSign
+security.provider.4=SunEC
+security.provider.5=SunJSSE
+security.provider.6=SunJCE
+security.provider.7=SunJGSS
+security.provider.8=SunSASL
+security.provider.9=XMLDSig
+security.provider.10=SunPCSC
+security.provider.11=JdkLDAP
+security.provider.12=JdkSASL
+securerandom.strongAlgorithms=Windows-PRNG:SunMSCAPI,SHA1PRNG:SUN

@@ -15,4 +15,17 @@ Do **not** start Linux Prism from the launch script — that process cannot see 
 `Local\` mappings.
 
 `PROTON_USE_WOW64=1` is set by the launch script so a 32-bit prefix can still run
-64-bit Prism/Java when the Proton build supports it. Prefer Proton Experimental / 9+.
+64-bit Prism/Java when the Proton build supports it.
+
+## Java / Wine
+
+Minecraft 26’s Windows Java 25 calls `NetworkInterface.getAll()` while seeding
+`SecureRandom`. That crashes the JVM on **Wine &lt; 9.3** (including **Proton 9.0**,
+which ships Wine 9.0) with `Internal Error (0xc06d007f)` in `kernelbase.dll`.
+The affinity warnings are harmless.
+
+VegasCraft’s instance sets `-Djava.security.properties=java.security.proton` so
+MSCAPI `Windows-PRNG` is used instead (avoids that call at Mixin init).
+
+Still prefer **GE-Proton 10+** or **Proton Experimental** (Wine ≥ 9.3) for FNV when
+you can — later networking code may touch `NetworkInterface` for real.
