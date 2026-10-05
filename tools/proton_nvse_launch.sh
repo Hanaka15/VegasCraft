@@ -2,15 +2,13 @@
 # Steam launch option for Fallout New Vegas (Proton) + xNVSE + VegasCraft:
 #   bash /home/hanaka/VegasCraft/tools/proton_nvse_launch.sh %command%
 #
-# Steam must start FalloutNV.exe (not nvse_loader.exe) or you get P:0000065432.
+# Order under Proton (keeps FNV focus):
+#   1) Windows Prism / Minecraft in the FNV wineprefix
+#   2) FalloutNV.exe once javaw is up
 #
-# NVSE: Proton does not always inject nvse_steam_loader.dll the way Windows Steam
-# does. We ship Ultimate ASI Loader as dinput8.dll + nvse_steam_loader.asi so
-# NVSE/vegascraft load inside FalloutNV.exe.
-#
-# Prism: start Windows Prism via proton only AFTER FalloutNV.exe is alive, with
-# PROTON_USE_WOW64 on that child only. Do not start Prism during FNV wineserver
-# init (that races and blocks the game window).
+# Starting Prism *after* FNV steals focus and is hard to alt-tab back from.
+# Starting Prism during FNV wineserver init can block FalloutNV.exe entirely —
+# so Prism goes first and we wait for it before exec'ing the game.
 set -euo pipefail
 
 FNV="${VEGASCRAFT_FNV:-$HOME/.local/share/Steam/steamapps/common/Fallout New Vegas enplczru}"
@@ -20,6 +18,7 @@ NVSE_DLL="$FNV/nvse_1_4.dll"
 ASI_LOADER="$FNV/dinput8.dll"
 ASI_NVSE="$FNV/nvse_steam_loader.asi"
 PLUGIN="$FNV/Data/NVSE/Plugins/vegascraft.dll"
+PLUGIN_INI="$FNV/Data/NVSE/Plugins/VegasCraft.ini"
 BUNDLE="$FNV/Data/NVSE/Plugins/VegasCraft/VegasCraft-Minecraft.zip"
 REPO_ASI="${VEGASCRAFT_REPO:-$HOME/VegasCraft}/tools/proton-nvse/dinput8.dll"
 LOG="${XDG_RUNTIME_DIR:-/tmp}/vegascraft-launch.log"
@@ -52,13 +51,13 @@ if [[ -f "$STEAM_LOADER" && -f "$ASI_LOADER" ]]; then
 fi
 
 if [[ ! -f "$STEAM_LOADER" || ! -f "$NVSE_DLL" ]]; then
-	log "WARNING: xNVSE incomplete (need nvse_steam_loader.dll + nvse_1_4.dll)"
+	log "WARNING: xNVSE incomplete"
 fi
 if [[ ! -f "$ASI_LOADER" || ! -f "$ASI_NVSE" ]]; then
 	log "WARNING: missing dinput8.dll / nvse_steam_loader.asi — NVSE may not load under Proton"
 fi
 if [[ ! -f "$PLUGIN" ]]; then
-	log "WARNING: missing $PLUGIN — install the CI/mod zip"
+	log "WARNING: missing $PLUGIN"
 fi
 if [[ ! -f "$BUNDLE" ]]; then
 	log "WARNING: missing $BUNDLE"
@@ -66,8 +65,13 @@ else
 	log "Found Minecraft bundle: $BUNDLE"
 fi
 
-# Native NVSE + ASI dinput8. Do NOT set PROTON_USE_WOW64 on the FNV process —
-# it can break 32-bit Steam/NVSE injection. WOW64 is enabled only for Prism.
+# Plugin must not CreateProcess Prism again (would steal focus after FNV is up).
+if [[ -f "$PLUGIN_INI" ]]; then
+	sed -i 's/^bStartWithHost\s*=\s*1/bStartWithHost = 0/' "$PLUGIN_INI" || true
+	log "Set bStartWithHost=0 (Prism owned by this launch script)"
+fi
+
+# Native NVSE + ASI dinput8. No PROTON_USE_WOW64 on FNV itself.
 export WINEDLLOVERRIDES="${WINEDLLOVERRIDES:+$WINEDLLOVERRIDES;}dinput8.dll=n,b;nvse_steam_loader.dll=n,b;nvse_1_4.dll=n,b"
 export STEAM_COMPAT_DATA_PATH="${STEAM_COMPAT_DATA_PATH:-$COMPAT}"
 export STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_COMPAT_CLIENT_INSTALL_PATH:-$HOME/.local/share/Steam}"
@@ -155,46 +159,53 @@ find_proton() {
 	return 1
 }
 
-start_windows_prism_when_fnv_ready() {
+mc_running() {
+	pgrep -f 'VegasCraft/Prism/.*javaw\.exe' >/dev/null 2>&1 \
+		|| pgrep -f 'VegasCraft/Prism/prismlauncher\.exe' >/dev/null 2>&1
+}
+
+start_minecraft_first() {
 	ensure_prism_unpacked || return 0
-	[[ -f "$PRISM_EXE" ]] || return 0
-	local proton
-	proton="$(find_proton)" || {
-		log "WARNING: no proton for Prism fallback"
+	[[ -f "$PRISM_EXE" ]] || {
+		log "WARNING: no prismlauncher.exe"
 		return 0
 	}
-	log "Will start Windows Prism after FalloutNV.exe is running (proton=$proton)"
+	local proton
+	proton="$(find_proton)" || {
+		log "WARNING: no proton — cannot start Prism before FNV"
+		return 0
+	}
+
+	if mc_running; then
+		log "Minecraft already running"
+		return 0
+	fi
+
+	log "Starting Windows Prism first (proton=$proton)"
 	(
-		# Wait for the real game process (not reaper/STL wrappers).
-		for _ in $(seq 1 90); do
-			if pgrep -f 'Fallout New Vegas.*/FalloutNV\.exe' >/dev/null 2>&1 \
-				|| pgrep -f 'Z:.*FalloutNV\.exe' >/dev/null 2>&1; then
-				break
-			fi
-			sleep 1
-		done
-		if ! pgrep -f 'FalloutNV\.exe' >/dev/null 2>&1; then
-			log "WARNING: FalloutNV.exe not seen — not starting Prism from script"
-			exit 0
-		fi
-		# Let NVSE + first frames settle; avoid wineserver startup race.
-		sleep 8
-		if pgrep -f 'VegasCraft/Prism/.*javaw\.exe' >/dev/null 2>&1 \
-			|| pgrep -f 'VegasCraft/Prism/prismlauncher\.exe' >/dev/null 2>&1; then
-			log "Prism/Minecraft already running — skip script start"
-			exit 0
-		fi
-		log "Starting Windows Prism in-prefix (PROTON_USE_WOW64=1)"
 		export STEAM_COMPAT_DATA_PATH="$COMPAT"
 		export STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_COMPAT_CLIENT_INSTALL_PATH:-$HOME/.local/share/Steam}"
 		export PROTON_USE_WOW64=1
 		"$proton" run "$PRISM_EXE" --launch VegasCraft >>"$LOG" 2>&1 || log "WARNING: proton Prism exit $?"
 	) &
 	disown || true
+
+	# Wait until javaw is up so wineserver is settled before FNV joins.
+	local i
+	for i in $(seq 1 120); do
+		if pgrep -f 'VegasCraft/Prism/.*javaw\.exe' >/dev/null 2>&1; then
+			log "Minecraft javaw up after ${i}s — starting Fallout"
+			# Brief settle so MC finishes grabbing input before FNV takes focus.
+			sleep 2
+			return 0
+		fi
+		sleep 1
+	done
+	log "WARNING: javaw not seen in 120s — starting Fallout anyway"
+	return 0
 }
 
-ensure_prism_unpacked || true
-start_windows_prism_when_fnv_ready || true
+start_minecraft_first || true
 
 cmd=("$@")
 for i in "${!cmd[@]}"; do

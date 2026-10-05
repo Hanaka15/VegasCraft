@@ -7,16 +7,16 @@ inside **the same Proton wineprefix** as `FalloutNV.exe`, because the bridge is
 How that happens:
 
 1. Install the mod zip so `Data/NVSE/Plugins/VegasCraft/VegasCraft-Minecraft.zip` exists.
-2. Launch FNV via Steam + `tools/proton_nvse_launch.sh` (starts `FalloutNV.exe`).
-   The script installs Ultimate ASI Loader as `dinput8.dll` + `nvse_steam_loader.asi`
-   so xNVSE actually loads under Proton, pre-unpacks the Minecraft bundle, then
-   starts Windows Prism with `proton run` **only after** `FalloutNV.exe` is alive
-   (avoids the wineserver race that blocks the FNV window).
-3. `vegascraft.dll` also tries `CreateProcess` on Prism in-prefix when NVSE loads.
+2. Launch via Steam + `tools/proton_nvse_launch.sh`:
+   - installs ASI Loader (`dinput8.dll` + `nvse_steam_loader.asi`) for xNVSE
+   - starts **Windows Prism / Minecraft first** in the FNV wineprefix
+   - waits for `javaw`, then starts `FalloutNV.exe` (FNV keeps focus; late MC
+     start otherwise alt-tabs you out and is hard to recover)
+   - sets `bStartWithHost=0` so the NVSE plugin does not launch a second Prism
+3. Shared memory still works: same `STEAM_COMPAT_DATA_PATH` / wineserver.
 
 Do **not** start Linux Prism. Do **not** set `PROTON_USE_WOW64=1` on the FNV
-process itself (breaks 32-bit NVSE); the script enables WOW64 only for the Prism
-child.
+process itself; the script enables WOW64 only for the Prism child.
 
 `PROTON_USE_WOW64=1` is set by the launch script so a 32-bit prefix can still run
 64-bit Prism/Java when the Proton build supports it.
