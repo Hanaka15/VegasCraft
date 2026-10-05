@@ -160,8 +160,9 @@ find_proton() {
 }
 
 mc_running() {
-	pgrep -f 'VegasCraft/Prism/.*javaw\.exe' >/dev/null 2>&1 \
-		|| pgrep -f 'VegasCraft/Prism/prismlauncher\.exe' >/dev/null 2>&1
+	# Wine shows backslashes in argv (VegasCraft\Prism\...\javaw.exe).
+	pgrep -f 'VegasCraft.*javaw\.exe' >/dev/null 2>&1 \
+		|| pgrep -f 'VegasCraft.*prismlauncher\.exe' >/dev/null 2>&1
 }
 
 start_minecraft_first() {
@@ -193,25 +194,27 @@ start_minecraft_first() {
 
 	# Wait until javaw is up so wineserver is settled before FNV joins.
 	local i
-	for i in $(seq 1 120); do
-		if pgrep -f 'VegasCraft/Prism/.*javaw\.exe' >/dev/null 2>&1; then
-			log "Minecraft javaw up after ${i}s — starting Fallout"
-			# Brief settle so MC finishes grabbing input before FNV takes focus.
+	for i in $(seq 1 90); do
+		if mc_running; then
+			if pgrep -f 'VegasCraft.*javaw\.exe' >/dev/null 2>&1; then
+				log "Minecraft javaw up after ${i}s — starting Fallout"
+			else
+				log "Prism up after ${i}s (waiting briefly for javaw)"
+				sleep 5
+			fi
 			sleep 2
 			return 0
 		fi
 		sleep 1
 	done
-	log "WARNING: javaw not seen in 120s — starting Fallout anyway"
+	log "WARNING: Minecraft not seen in 90s — starting Fallout anyway"
 	return 0
 }
 
 stop_vegas_minecraft() {
 	log "Stopping VegasCraft Prism/Minecraft"
-	# Wine PE processes + proton wrappers for this prefix only
-	pkill -f 'VegasCraft/Prism/prismlauncher\.exe' 2>/dev/null || true
-	pkill -f 'VegasCraft/Prism/.*/javaw\.exe' 2>/dev/null || true
-	pkill -f 'compatdata/22490/.*/prismlauncher' 2>/dev/null || true
+	pkill -f 'VegasCraft.*prismlauncher\.exe' 2>/dev/null || true
+	pkill -f 'VegasCraft.*javaw\.exe' 2>/dev/null || true
 	if [[ -n "${PRISM_BG_PID:-}" ]] && kill -0 "$PRISM_BG_PID" 2>/dev/null; then
 		kill "$PRISM_BG_PID" 2>/dev/null || true
 		sleep 0.5
