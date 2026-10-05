@@ -11,6 +11,8 @@ namespace vegascraft
 
 	bool Game::Init()
 	{
+		// Always kick Prism first — shared-memory setup must not block launch.
+		Launcher::StartMinecraft();
 		if (!link_.IsOpen()) {
 			if (!link_.Create()) {
 				Launcher::Logf("shared-memory Create failed");
@@ -18,7 +20,6 @@ namespace vegascraft
 			}
 			Launcher::Logf("shared-memory link created");
 		}
-		Launcher::StartMinecraft();
 		return true;
 	}
 

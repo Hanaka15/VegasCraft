@@ -79,34 +79,55 @@ namespace vegascraft::Launcher
 			std::error_code ec;
 			std::filesystem::create_directories(dest, ec);
 
-			// 1) PowerShell (often available in Proton)
-			{
-				std::wstring ps =
-					L"powershell.exe -NoProfile -NonInteractive -Command \"Expand-Archive -LiteralPath '" + zip.wstring() +
-					L"' -DestinationPath '" + dest.wstring() + L"' -Force\"";
+			const auto prismOk = [&] {
+				return std::filesystem::exists(dest / "Prism" / "prismlauncher.exe");
+			};
+
+			// 32-bit FNV sees System32 as SysWOW64; use Sysnative for the real 64-bit tar/powershell.
+			const std::wstring sysNative = ExpandEnv(L"%SystemRoot%\\Sysnative");
+			const std::wstring system32 = ExpandEnv(L"%SystemRoot%\\System32");
+
+			auto tryTar = [&](const std::wstring& dir) -> bool {
+				const std::filesystem::path tarExe = std::filesystem::path(dir) / L"tar.exe";
+				if (!std::filesystem::exists(tarExe)) {
+					Logf("unpack: no tar at %s", tarExe.string().c_str());
+					return false;
+				}
+				std::wstring cmd = L"\"" + tarExe.wstring() + L"\" -xf \"" + zip.wstring() + L"\" -C \"" +
+								   dest.wstring() + L"\"";
 				DWORD code = 1;
-				if (RunHidden(std::move(ps), dest, 10 * 60 * 1000, code) && code == 0 &&
-					std::filesystem::exists(dest / "Prism" / "prismlauncher.exe")) {
-					Logf("unpack: powershell Expand-Archive ok");
+				if (RunHidden(std::move(cmd), dest, 10 * 60 * 1000, code) && code == 0 && prismOk()) {
+					Logf("unpack: tar ok (%s)", tarExe.string().c_str());
+					return true;
+				}
+				Logf("unpack: tar failed (%s) code=%lu", tarExe.string().c_str(), code);
+				return false;
+			};
+
+			if (tryTar(sysNative) || tryTar(system32)) {
+				return true;
+			}
+
+			auto tryPs = [&](const std::wstring& dir) -> bool {
+				const std::filesystem::path psExe = std::filesystem::path(dir) / L"WindowsPowerShell\\v1.0\\powershell.exe";
+				const std::wstring psPath = std::filesystem::exists(psExe) ? psExe.wstring() : L"powershell.exe";
+				std::wstring ps = L"\"" + psPath +
+								  L"\" -NoProfile -NonInteractive -Command \"Expand-Archive -LiteralPath '" +
+								  zip.wstring() + L"' -DestinationPath '" + dest.wstring() + L"' -Force\"";
+				DWORD code = 1;
+				if (RunHidden(std::move(ps), dest, 10 * 60 * 1000, code) && code == 0 && prismOk()) {
+					Logf("unpack: powershell ok");
 					return true;
 				}
 				Logf("unpack: powershell failed (code %lu)", code);
+				return false;
+			};
+
+			if (tryPs(sysNative) || tryPs(system32)) {
+				return true;
 			}
 
-			// 2) tar.exe
-			{
-				std::wstring tar = L"\"" + ExpandEnv(L"%SystemRoot%\\System32\\tar.exe") + L"\" -xf \"" + zip.wstring() +
-								   L"\" -C \"" + dest.wstring() + L"\"";
-				DWORD code = 1;
-				if (RunHidden(std::move(tar), dest, 10 * 60 * 1000, code) && code == 0 &&
-					std::filesystem::exists(dest / "Prism" / "prismlauncher.exe")) {
-					Logf("unpack: tar ok");
-					return true;
-				}
-				Logf("unpack: tar failed (code %lu)", code);
-			}
-
-			return false;
+			return prismOk();
 		}
 
 		std::filesystem::path EnsureBundle()
@@ -123,8 +144,8 @@ namespace vegascraft::Launcher
 				return {};
 			}
 
-			const auto stamp = std::to_string(std::filesystem::file_size(bundle, ec)) + " " +
-							   std::to_string(std::filesystem::last_write_time(bundle, ec).time_since_epoch().count());
+			// Size-only stamp so Linux pre-deploy into the Proton prefix can match MSVC.
+			const auto stamp = std::to_string(std::filesystem::file_size(bundle, ec));
 			std::string installed;
 			if (std::ifstream in{ dir / "bundle.stamp" }; in) {
 				std::getline(in, installed);
@@ -147,10 +168,21 @@ namespace vegascraft::Launcher
 			const auto copy = dir / "bundle.zip";
 			if (!std::filesystem::copy_file(bundle, copy, std::filesystem::copy_options::overwrite_existing, ec)) {
 				Logf("copy bundle failed: %s", ec.message().c_str());
+				// Keep a previously extracted Prism (e.g. Linux-side pre-deploy into the prefix).
+				if (std::filesystem::exists(prism)) {
+					Logf("using existing prism after copy failure");
+					return prism;
+				}
 				return {};
 			}
 			if (!UnpackZip(copy, dir)) {
 				std::filesystem::remove(copy, ec);
+				if (std::filesystem::exists(prism)) {
+					Logf("unpack helpers failed — using existing prismlauncher.exe");
+					std::ofstream(dir / "bundle.stamp") << stamp;
+					return prism;
+				}
+				Logf("FAIL: unpack failed and no prismlauncher.exe under %s", dir.string().c_str());
 				return {};
 			}
 			std::filesystem::remove(copy, ec);
@@ -175,14 +207,34 @@ namespace vegascraft::Launcher
 			STARTUPINFOW si{ sizeof(si) };
 			PROCESS_INFORMATION pi{};
 			Logf("CreateProcess: %s", std::filesystem::path(command).string().c_str());
-			if (!::CreateProcessW(nullptr, command.data(), nullptr, nullptr, FALSE, 0, nullptr,
+			if (::CreateProcessW(nullptr, command.data(), nullptr, nullptr, FALSE, 0, nullptr,
 					dir.empty() ? nullptr : dir.c_str(), &si, &pi)) {
-				Logf("CreateProcess failed err=%lu", ::GetLastError());
+				Logf("CreateProcess ok pid=%lu", pi.dwProcessId);
+				::CloseHandle(pi.hThread);
+				::CloseHandle(pi.hProcess);
+				return true;
+			}
+			const DWORD cpErr = ::GetLastError();
+			Logf("CreateProcess failed err=%lu — trying ShellExecuteEx", cpErr);
+
+			// Fallback: 32→64 launch under some Wine/Proton builds needs ShellExecute.
+			SHELLEXECUTEINFOW sei{ sizeof(sei) };
+			sei.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_FLAG_NO_UI;
+			sei.lpVerb = L"open";
+			sei.lpFile = program.c_str();
+			sei.lpParameters = args.c_str();
+			sei.lpDirectory = dir.empty() ? nullptr : dir.c_str();
+			sei.nShow = SW_SHOWNORMAL;
+			if (!::ShellExecuteExW(&sei)) {
+				Logf("ShellExecuteEx failed err=%lu", ::GetLastError());
 				return false;
 			}
-			Logf("CreateProcess ok pid=%lu", pi.dwProcessId);
-			::CloseHandle(pi.hThread);
-			::CloseHandle(pi.hProcess);
+			if (sei.hProcess) {
+				Logf("ShellExecuteEx ok pid handle");
+				::CloseHandle(sei.hProcess);
+			} else {
+				Logf("ShellExecuteEx ok (no process handle)");
+			}
 			return true;
 		}
 	}

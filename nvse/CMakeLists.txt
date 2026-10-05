@@ -24,6 +24,7 @@ target_include_directories(vegascraft PRIVATE
 target_compile_definitions(vegascraft PRIVATE NOMINMAX WIN32_LEAN_AND_MEAN)
 if(MSVC)
 	target_compile_options(vegascraft PRIVATE /W4 /permissive- /Zc:preprocessor /utf-8 /MP)
+	target_link_libraries(vegascraft PRIVATE Shell32)
 	set_target_properties(vegascraft PROPERTIES OUTPUT_NAME "vegascraft")
 endif()
 

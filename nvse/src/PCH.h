@@ -4,6 +4,7 @@
 #define NOMINMAX
 
 #include <Windows.h>
+#include <shellapi.h>
 
 #include <cstdint>
 #include <cstring>
