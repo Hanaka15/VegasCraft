@@ -2,22 +2,28 @@
 
 #include "PCH.h"
 
-namespace vegascraft
+#include <atomic>
+
+namespace vegascraft::Launcher
 {
-	// Phase 6: start Prism / custom launcher with the VegasCraft instance.
-	class Launcher
+	enum class Status : std::uint32_t
 	{
-	public:
-		bool LoadIni(const char* path);
-		bool StartMinecraft();
-		void StopMinecraft();
-
-		bool startWithHost{ true };
-		std::wstring launcher;
-		std::wstring arguments{ L"--launch VegasCraft" };
-
-	private:
-		PROCESS_INFORMATION pi_{};
-		bool running_{ false };
+		kOff = 0,
+		kStarting,
+		kSignIn,    // first run: Prism needs Microsoft account
+		kRunning,
+		kNoLauncher,
+		kFailed,
 	};
+
+	Status GetStatus();
+	bool MinecraftRunning();
+
+	// Unpack Data/NVSE/Plugins/VegasCraft/VegasCraft-Minecraft.zip → %LOCALAPPDATA%\VegasCraft
+	// and start portable Prism (--launch VegasCraft). Under Proton this is still a Windows
+	// CreateProcess inside FNV's wineprefix, so Local\VegasCraft_v1 shared memory works.
+	void StartMinecraft();
+
+	// Does not kill Prism/MC (they quit themselves); reserved for future cleanup.
+	void StopMinecraft();
 }

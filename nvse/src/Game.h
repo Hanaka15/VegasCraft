@@ -44,7 +44,6 @@ namespace vegascraft
 		WorldContext context_;
 		Dig dig_;
 		Skills skills_;
-		Launcher launcher_;
 
 		bool inGame_{ false };
 		double debugFnvX_{ 0 }, debugFnvY_{ 0 }, debugFnvZ_{ 128 };

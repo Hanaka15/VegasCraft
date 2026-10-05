@@ -11,17 +11,18 @@ namespace vegascraft
 
 	bool Game::Init()
 	{
-		launcher_.LoadIni("Data\\NVSE\\Plugins\\VegasCraft.ini");
 		if (!link_.Create()) {
 			return false;
 		}
-		launcher_.StartMinecraft();
+		// Starts Windows Prism from Data/NVSE/Plugins/VegasCraft/VegasCraft-Minecraft.zip
+		// via CreateProcess — under Proton that stays in FNV's wineprefix.
+		Launcher::StartMinecraft();
 		return true;
 	}
 
 	void Game::Shutdown()
 	{
-		launcher_.StopMinecraft();
+		Launcher::StopMinecraft();
 		compositor_.Shutdown();
 		link_.Close();
 	}

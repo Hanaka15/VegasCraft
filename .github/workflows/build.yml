@@ -14,8 +14,7 @@ jobs:
     name: NVSE plugin (Win32)
     runs-on: windows-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
+      - uses: actions/checkout@v5
 
       - name: Configure (Win32 / VS 2026)
         working-directory: nvse
@@ -25,33 +24,23 @@ jobs:
         working-directory: nvse
         run: cmake --build --preset release --config Release
 
-      - name: Stage plugin package
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force dist/NVSE/Plugins | Out-Null
-          Copy-Item nvse/build/Release/vegascraft.dll dist/NVSE/Plugins/
-          if (Test-Path nvse/build/Release/vegascraft.pdb) {
-            Copy-Item nvse/build/Release/vegascraft.pdb dist/NVSE/Plugins/
-          }
-          Copy-Item nvse/VegasCraft.ini dist/NVSE/Plugins/
-          Get-ChildItem -Recurse dist | Format-Table Name, Length
-
-      - name: Upload vegascraft.dll
+      - name: Upload plugin
         uses: actions/upload-artifact@v4
         with:
-          name: vegascraft-nvse-win32
-          path: dist/NVSE/Plugins/
+          name: vegascraft-nvse-bin
+          path: |
+            nvse/build/Release/vegascraft.dll
+            nvse/build/Release/vegascraft.pdb
+            nvse/VegasCraft.ini
           if-no-files-found: error
 
   fabric-mod:
     name: Fabric mod
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v5
+      - uses: actions/checkout@v5
 
-      - name: Set up JDK 25
-        uses: actions/setup-java@v5
+      - uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "25"
@@ -66,8 +55,105 @@ jobs:
       - name: Upload jar
         uses: actions/upload-artifact@v4
         with:
-          name: vegascraft-fabric
+          name: vegascraft-fabric-bin
           path: |
-            fabric/build/libs/*.jar
+            fabric/build/libs/vegascraft-*.jar
             !fabric/build/libs/*-sources.jar
+          if-no-files-found: error
+
+  package:
+    name: Package mod + Prism bundle
+    needs: [nvse-plugin, fabric-mod]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Download plugin
+        uses: actions/download-artifact@v4
+        with:
+          name: vegascraft-nvse-bin
+          path: _in/nvse
+
+      - name: Download fabric
+        uses: actions/download-artifact@v4
+        with:
+          name: vegascraft-fabric-bin
+          path: _in/fabric
+
+      - name: Build VegasCraft-Minecraft.zip + install zip
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = "Stop"
+          $version = (Select-String -Path fabric/gradle.properties -Pattern '^version=(.+)$').Matches[0].Groups[1].Value.Trim()
+          $prismVersion = "11.1.1"
+          $prismZip = "PrismLauncher-Windows-MSVC-Portable-$prismVersion.zip"
+          $prismUrl = "https://github.com/PrismLauncher/PrismLauncher/releases/download/$prismVersion/$prismZip"
+          $prismSha256 = "ab35a770fb06d89d2ccc098079db5db329fb4e68f42b72babd8b095efde3d2d7"
+          $fabricApiJar = "fabric-api-0.161.0+26.3.jar"
+          $fabricApiUrl = "https://cdn.modrinth.com/data/P7dR8mSH/versions/bNnaTiuM/fabric-api-0.161.0%2B26.3.jar"
+          $fabricApiSha512 = "ed6b2586d6fde11fde8472f5a527c51e99b67026e46f94d4bfd85e7e28ce5ee299173ee16ad576ceb51f39f98d30a811086a6deb1a86a524859cc16e12da109d"
+          $e4mcJar = "e4mc-fabric-6.2.2-modern.jar"
+          $e4mcUrl = "https://cdn.modrinth.com/data/qANg5Jrr/versions/AouleFRY/e4mc-fabric-6.2.2-modern.jar"
+          $e4mcSha512 = "01ef0a8c5b76e2cb0effd337bad3350d8807d100d0ec661e01b2ffb20af7b652f756c5eaa11bee233c37905bfd7b573f7a85f3d15bfd2833962c76f02cd59a86"
+
+          function Get-Pinned($url, $path, $algo, $hash) {
+            New-Item -ItemType Directory (Split-Path $path) -Force | Out-Null
+            if (-not (Test-Path $path)) {
+              Invoke-WebRequest -Uri $url -OutFile $path -UseBasicParsing
+            }
+            if ($hash) {
+              $got = (Get-FileHash $path -Algorithm $algo).Hash
+              if ($got -ne $hash.ToUpper()) { throw "$path hash mismatch" }
+            }
+          }
+
+          $cache = ".tools/prism"
+          Get-Pinned $prismUrl "$cache/$prismZip" SHA256 $prismSha256
+          Get-Pinned $fabricApiUrl "$cache/$fabricApiJar" SHA512 $fabricApiSha512
+          Get-Pinned $e4mcUrl "$cache/$e4mcJar" SHA512 $e4mcSha512
+          Get-Pinned "https://raw.githubusercontent.com/PrismLauncher/PrismLauncher/$prismVersion/LICENSE" "$cache/Prism-LICENSE.txt" "" ""
+
+          $jar = Get-ChildItem _in/fabric/vegascraft-*.jar | Select-Object -First 1
+          $dll = Get-Item _in/nvse/vegascraft.dll
+          $ini = Get-Item _in/nvse/VegasCraft.ini
+
+          $bundle = "dist/bundle"
+          Remove-Item -Recurse -Force dist -ErrorAction SilentlyContinue
+          New-Item -ItemType Directory $bundle -Force | Out-Null
+          Copy-Item -Recurse tools/minecraft-bundle/* $bundle
+          Expand-Archive "$cache/$prismZip" "$bundle/Prism" -Force
+          Copy-Item "$cache/Prism-LICENSE.txt" "$bundle/Prism/LICENSE-PrismLauncher.txt"
+          (Get-Content "$bundle/Prism/THIRD-PARTY.txt" -Raw).Replace("{PRISM_VERSION}", $prismVersion) | Set-Content "$bundle/Prism/THIRD-PARTY.txt" -NoNewline
+
+          $mods = "$bundle/Prism/instances/VegasCraft/.minecraft/mods"
+          New-Item -ItemType Directory $mods -Force | Out-Null
+          Copy-Item "$cache/$fabricApiJar" $mods
+          Copy-Item "$cache/$e4mcJar" $mods
+          Copy-Item $jar.FullName "$mods/vegascraft-$version.jar"
+          Set-Content "$bundle/bundle-version.txt" "VegasCraft $version, Prism $prismVersion" -NoNewline
+
+          Compress-Archive -Path "$bundle/*" -DestinationPath "dist/VegasCraft-Minecraft.zip" -Force
+
+          $modRoot = "dist/mod"
+          New-Item -ItemType Directory "$modRoot/NVSE/Plugins/VegasCraft" -Force | Out-Null
+          Copy-Item $dll.FullName "$modRoot/NVSE/Plugins/vegascraft.dll"
+          Copy-Item $ini.FullName "$modRoot/NVSE/Plugins/VegasCraft.ini"
+          Copy-Item "dist/VegasCraft-Minecraft.zip" "$modRoot/NVSE/Plugins/VegasCraft/VegasCraft-Minecraft.zip"
+          Copy-Item LICENSE "$modRoot/NVSE/Plugins/VegasCraft/LICENSE.txt"
+          Copy-Item THIRD-PARTY-NOTICES.md "$modRoot/NVSE/Plugins/VegasCraft/THIRD-PARTY-NOTICES.md"
+          if (Test-Path _in/nvse/vegascraft.pdb) {
+            Copy-Item _in/nvse/vegascraft.pdb "$modRoot/NVSE/Plugins/vegascraft.pdb"
+          }
+
+          Compress-Archive -Path "$modRoot/*" -DestinationPath "dist/VegasCraft-$version.zip" -Force
+          Copy-Item $jar.FullName "dist/vegascraft-fabric-$version.jar"
+          Get-ChildItem dist -File | Format-Table Name, Length
+
+      - name: Upload release package
+        uses: actions/upload-artifact@v4
+        with:
+          name: VegasCraft-mod
+          path: |
+            dist/VegasCraft-*.zip
+            dist/vegascraft-fabric-*.jar
           if-no-files-found: error

@@ -59,16 +59,22 @@ Start the game with `nvse_loader.exe`, or Steam with `nvse_steam_loader.dll` pre
 
 ### GitHub Actions (recommended)
 
-Push to GitHub; the [Build](.github/workflows/build.yml) workflow produces:
+Push to GitHub; [Build](.github/workflows/build.yml) produces **`VegasCraft-mod`**:
 
-- **`vegascraft-nvse-win32`** — `vegascraft.dll` + `VegasCraft.ini` (Win32 / MSVC)
-- **`vegascraft-fabric`** — Fabric mod jar
+- `VegasCraft-<ver>.zip` — install like any NVSE mod:
+  - `NVSE/Plugins/vegascraft.dll`
+  - `NVSE/Plugins/VegasCraft.ini`
+  - `NVSE/Plugins/VegasCraft/VegasCraft-Minecraft.zip` (**portable Windows Prism** + Fabric instance)
+- `vegascraft-fabric-<ver>.jar` — Fabric mod alone
 
-Download the NVSE artifact and copy into your game:
+Under **Proton**, the plugin unpacks the zip to the prefix’s `%LOCALAPPDATA%\VegasCraft` and
+`CreateProcess`es Windows `prismlauncher.exe` so Minecraft shares FNV’s wineprefix (required for
+`Local\VegasCraft_v1`). Do not start Linux Prism from the Steam launch script.
 
-```
-Fallout New Vegas/Data/NVSE/Plugins/vegascraft.dll
-Fallout New Vegas/Data/NVSE/Plugins/VegasCraft.ini
+Copy the mod zip contents into your FNV `Data/` folder (or MO2), then launch with:
+
+```bash
+bash /home/hanaka/VegasCraft/tools/proton_nvse_launch.sh %command%
 ```
 
 ### Local — Fabric mod
@@ -87,8 +93,6 @@ cd nvse
 cmake --preset default
 cmake --build --preset release
 ```
-
-Requires Visual Studio (C++), CMake 3.25+.
 
 ### Protocol stand-in (no FNV)
 
