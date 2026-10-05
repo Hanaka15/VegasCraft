@@ -24,14 +24,19 @@ jobs:
         working-directory: nvse
         run: cmake --build --preset release --config Release
 
+      - name: Stage flat plugin files
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force _stage/nvse | Out-Null
+          Copy-Item nvse/build/Release/vegascraft.dll _stage/nvse/
+          Copy-Item nvse/VegasCraft.ini _stage/nvse/
+          if (Test-Path nvse/build/Release/vegascraft.pdb) { Copy-Item nvse/build/Release/vegascraft.pdb _stage/nvse/ }
+
       - name: Upload plugin
         uses: actions/upload-artifact@v4
         with:
           name: vegascraft-nvse-bin
-          path: |
-            nvse/build/Release/vegascraft.dll
-            nvse/build/Release/vegascraft.pdb
-            nvse/VegasCraft.ini
+          path: _stage/nvse/
           if-no-files-found: error
 
   fabric-mod:
@@ -113,9 +118,15 @@ jobs:
           Get-Pinned $e4mcUrl "$cache/$e4mcJar" SHA512 $e4mcSha512
           Get-Pinned "https://raw.githubusercontent.com/PrismLauncher/PrismLauncher/$prismVersion/LICENSE" "$cache/Prism-LICENSE.txt" "" ""
 
-          $jar = Get-ChildItem _in/fabric/vegascraft-*.jar | Select-Object -First 1
-          $dll = Get-Item _in/nvse/vegascraft.dll
-          $ini = Get-Item _in/nvse/VegasCraft.ini
+          $jar = Get-ChildItem _in/fabric -Recurse -Filter 'vegascraft-*.jar' |
+            Where-Object { $_.Name -notlike '*-sources.jar' } |
+            Select-Object -First 1
+          if (-not $jar) { throw "fabric jar missing under _in/fabric" }
+          $dll = Get-ChildItem _in/nvse -Recurse -Filter 'vegascraft.dll' | Select-Object -First 1
+          if (-not $dll) { throw "vegascraft.dll missing under _in/nvse"; }
+          $ini = Get-ChildItem _in/nvse -Recurse -Filter 'VegasCraft.ini' | Select-Object -First 1
+          if (-not $ini) { $ini = Get-Item nvse/VegasCraft.ini }
+          Get-ChildItem _in -Recurse | Select-Object FullName | Format-Table -AutoSize
 
           $bundle = "dist/bundle"
           Remove-Item -Recurse -Force dist -ErrorAction SilentlyContinue
@@ -141,8 +152,8 @@ jobs:
           Copy-Item "dist/VegasCraft-Minecraft.zip" "$modRoot/NVSE/Plugins/VegasCraft/VegasCraft-Minecraft.zip"
           Copy-Item LICENSE "$modRoot/NVSE/Plugins/VegasCraft/LICENSE.txt"
           Copy-Item THIRD-PARTY-NOTICES.md "$modRoot/NVSE/Plugins/VegasCraft/THIRD-PARTY-NOTICES.md"
-          if (Test-Path _in/nvse/vegascraft.pdb) {
-            Copy-Item _in/nvse/vegascraft.pdb "$modRoot/NVSE/Plugins/vegascraft.pdb"
+          if (Test-Path ($dll.DirectoryName + '/vegascraft.pdb')) {
+            Copy-Item ($dll.DirectoryName + '/vegascraft.pdb') "$modRoot/NVSE/Plugins/vegascraft.pdb"
           }
 
           Compress-Archive -Path "$modRoot/*" -DestinationPath "dist/VegasCraft-$version.zip" -Force
