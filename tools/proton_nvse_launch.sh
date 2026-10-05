@@ -54,12 +54,52 @@ export PROTON_USE_WOW64="${PROTON_USE_WOW64:-1}"
 export STEAM_COMPAT_DATA_PATH="${STEAM_COMPAT_DATA_PATH:-$COMPAT}"
 export STEAM_COMPAT_CLIENT_INSTALL_PATH="${STEAM_COMPAT_CLIENT_INSTALL_PATH:-$HOME/.local/share/Steam}"
 
+patch_java_security_workaround() {
+	# Wine < 9.3 (Proton 9): Java 25 SecureRandom → NetworkInterface.getAll crash.
+	local inst="$PRISM_DIR/Prism/instances/VegasCraft"
+	local sec_dst="$inst/.minecraft/java.security.proton"
+	local cfg repo_sec
+	if [[ ! -f "$sec_dst" ]]; then
+		repo_sec="${VEGASCRAFT_REPO:-$HOME/VegasCraft}/tools/minecraft-bundle/Prism/instances/VegasCraft/.minecraft/java.security.proton"
+		if [[ -f "$repo_sec" ]]; then
+			mkdir -p "$(dirname "$sec_dst")"
+			cp -f "$repo_sec" "$sec_dst"
+		fi
+	fi
+	cfg="$inst/instance.cfg"
+	[[ -f "$cfg" ]] || return 0
+	if rg -q 'java\.security\.properties=java\.security\.proton' "$cfg"; then
+		return 0
+	fi
+	python3 - "$cfg" <<'PY'
+import pathlib, re, sys
+p = pathlib.Path(sys.argv[1])
+t = p.read_text()
+def inject(m):
+    args = m.group(1)
+    if "java.security.properties" in args:
+        return m.group(0)
+    needle = "--enable-native-access=ALL-UNNAMED"
+    prop = "-Djava.security.properties=java.security.proton"
+    if needle in args:
+        args = args.replace(needle, f"{needle} {prop}", 1)
+    else:
+        args = f"{prop} {args}"
+    return f'JvmArgs="{args}"'
+t2, n = re.subn(r'^JvmArgs="?(.*?)"?\s*$', inject, t, count=1, flags=re.M)
+if n == 1:
+    p.write_text(t2)
+PY
+	log "Patched instance.cfg for Proton Java SecureRandom workaround"
+}
+
 ensure_prism_unpacked() {
 	if [[ ! -f "$BUNDLE" ]]; then
 		return 1
 	fi
 	if [[ -x "$PRISM_EXE" || -f "$PRISM_EXE" ]]; then
 		log "Prism already present: $PRISM_EXE"
+		patch_java_security_workaround || true
 		return 0
 	fi
 	log "Pre-unpacking Minecraft bundle into prefix LocalAppData..."
@@ -71,8 +111,9 @@ ensure_prism_unpacked() {
 	if [[ -f "$PRISM_DIR/defaults/prismlauncher.cfg" && ! -f "$PRISM_DIR/Prism/prismlauncher.cfg" ]]; then
 		cp -f "$PRISM_DIR/defaults/prismlauncher.cfg" "$PRISM_DIR/Prism/prismlauncher.cfg"
 	fi
-	printf 'linux-predeploy\n' >"$PRISM_DIR/bundle.stamp"
+	stat -c '%s' "$BUNDLE" >"$PRISM_DIR/bundle.stamp"
 	log "Unpacked Prism to $PRISM_DIR"
+	patch_java_security_workaround || true
 	return 0
 }
 
