@@ -1,0 +1,73 @@
+name: Build
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  nvse-plugin:
+    name: NVSE plugin (Win32)
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure (Win32)
+        working-directory: nvse
+        run: cmake --preset default -DVEGASCRAFT_DEPLOY_DIR=
+
+      - name: Build Release
+        working-directory: nvse
+        run: cmake --build --preset release --config Release
+
+      - name: Stage plugin package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist/NVSE/Plugins | Out-Null
+          Copy-Item nvse/build/Release/vegascraft.dll dist/NVSE/Plugins/
+          if (Test-Path nvse/build/Release/vegascraft.pdb) {
+            Copy-Item nvse/build/Release/vegascraft.pdb dist/NVSE/Plugins/
+          }
+          Copy-Item nvse/VegasCraft.ini dist/NVSE/Plugins/
+          Get-ChildItem -Recurse dist | Format-Table Name, Length
+
+      - name: Upload vegascraft.dll
+        uses: actions/upload-artifact@v4
+        with:
+          name: vegascraft-nvse-win32
+          path: dist/NVSE/Plugins/
+          if-no-files-found: error
+
+  fabric-mod:
+    name: Fabric mod
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 25
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "25"
+          cache: gradle
+
+      - name: Build
+        working-directory: fabric
+        run: |
+          chmod +x gradlew
+          ./gradlew build --no-configuration-cache --stacktrace
+
+      - name: Upload jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: vegascraft-fabric
+          path: |
+            fabric/build/libs/*.jar
+            !fabric/build/libs/*-sources.jar
+          if-no-files-found: error

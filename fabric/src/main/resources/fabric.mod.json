@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "id": "vegascraft",
+  "version": "${version}",
+  "name": "VegasCraft",
+  "description": "Play Fallout New Vegas with Minecraft physics, inventory and viewmodels.",
+  "authors": ["VegasCraft contributors"],
+  "contributors": ["chasmlol (SkyCraft architecture)"],
+  "contact": {
+    "sources": "https://github.com/chasmlol/VegasCraft"
+  },
+  "license": "MIT",
+  "environment": "client",
+  "entrypoints": {
+    "main": ["dev.vegascraft.VegasCraft"],
+    "client": ["dev.vegascraft.client.VegasCraftClient"]
+  },
+  "mixins": [
+    "vegascraft.mixins.json",
+    { "config": "vegascraft.client.mixins.json", "environment": "client" }
+  ],
+  "depends": {
+    "fabricloader": ">=0.19.5",
+    "minecraft": "~26.3",
+    "java": ">=25",
+    "fabric-api": "*"
+  }
+}
