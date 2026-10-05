@@ -8,11 +8,13 @@ How that happens:
 
 1. Install the mod zip so `Data/NVSE/Plugins/VegasCraft/VegasCraft-Minecraft.zip` exists.
 2. Launch FNV via Steam + `tools/proton_nvse_launch.sh` (starts `FalloutNV.exe`, loads xNVSE).
+   The script may pre-unpack the bundle; it must **not** `proton run` Prism itself.
 3. `vegascraft.dll` unpacks the zip to the prefix’s `%LOCALAPPDATA%\VegasCraft` and
-   `CreateProcess`es `prismlauncher.exe --launch VegasCraft`.
+   `CreateProcess`es `prismlauncher.exe --launch VegasCraft` in the **same** wineserver.
 
-Do **not** start Linux Prism from the launch script — that process cannot see Wine’s
-`Local\` mappings.
+Do **not** start Linux Prism, and do **not** start a second `proton run` for Windows
+Prism — a parallel Proton session races FNV and often leaves `FalloutNV.exe` stuck
+while Minecraft flashes.
 
 `PROTON_USE_WOW64=1` is set by the launch script so a 32-bit prefix can still run
 64-bit Prism/Java when the Proton build supports it.
