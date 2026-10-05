@@ -2,7 +2,7 @@ package dev.vegascraft.mixin;
 
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
-import dev.vegascraft.combat.SkyrimActorEntity;
+import dev.vegascraft.combat.FNVActorEntity;
 import dev.vegascraft.link.Proto;
 import dev.vegascraft.link.VegasLink;
 import dev.vegascraft.world.SkyClip;
@@ -51,7 +51,7 @@ public abstract class AbstractArrowMixin {
 	@WrapOperation(method = "onHitEntity", at = @At(value = "INVOKE", target = "Lnet/minecraft/world/entity/LivingEntity;setArrowCount(I)V"))
 	private void vegascraft$stickInSkyrimActor(LivingEntity mob, int count, Operation<Void> original) {
 		original.call(mob, count);
-		if (!(mob instanceof SkyrimActorEntity actor) || this.vegascraft$hitAt == null || !VegasLink.active()) {
+		if (!(mob instanceof FNVActorEntity actor) || this.vegascraft$hitAt == null || !VegasLink.active()) {
 			return;
 		}
 		AbstractArrow self = (AbstractArrow) (Object) this;

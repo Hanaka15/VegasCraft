@@ -1,6 +1,6 @@
 package dev.vegascraft.client;
 
-import dev.vegascraft.combat.SkyrimActorEntity;
+import dev.vegascraft.combat.FNVActorEntity;
 import dev.vegascraft.link.VegasLink;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -30,7 +30,7 @@ final class ProxySync {
 			BY_ID.put(a.formId(), a);
 		}
 		for (Entity entity : minecraft.level.entitiesForRendering()) {
-			if (entity instanceof SkyrimActorEntity proxy) {
+			if (entity instanceof FNVActorEntity proxy) {
 				VegasLink.Actor a = BY_ID.get(proxy.formId());
 				if (a == null) {
 					continue;

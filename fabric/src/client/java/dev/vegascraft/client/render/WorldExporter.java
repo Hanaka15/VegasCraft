@@ -340,7 +340,7 @@ public final class WorldExporter {
 				addItem(minecraft, level, e, item.getItem(), p.add(0, bob, 0), spin);
 			} else if (e instanceof ItemSupplier supplier) {
 				addItem(minecraft, level, e, supplier.getItem(), p.add(0, e.getBbHeight() * 0.5 - 0.25, 0), 0.0F);
-			} else if (e instanceof net.minecraft.world.entity.LivingEntity && !(e instanceof dev.vegascraft.combat.SkyrimActorEntity) && !e.isInvisible()
+			} else if (e instanceof net.minecraft.world.entity.LivingEntity && !(e instanceof dev.vegascraft.combat.FNVActorEntity) && !e.isInvisible()
 				&& (e != minecraft.player || minecraft.gameRenderer.mainCamera().isDetached())) {
 				// Players and mobs: Skyrim darkens the ground softly under their feet.
 				ENTITIES.add(new VegasLink.WorldEntity(Proto.WE_SHADOW, e.getId(), (float) p.x, (float) p.y, (float) p.z, 0.0F, 0.0F, e.getBbWidth(), null, null, 0));

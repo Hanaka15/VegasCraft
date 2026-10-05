@@ -2,7 +2,7 @@ package dev.vegascraft.mixin;
 
 import dev.vegascraft.VegasCraft;
 import dev.vegascraft.combat.SkyCombat;
-import dev.vegascraft.combat.SkyrimActorEntity;
+import dev.vegascraft.combat.FNVActorEntity;
 import dev.vegascraft.link.Proto;
 import dev.vegascraft.link.VegasLink;
 import net.minecraft.world.damagesource.DamageSource;
@@ -18,7 +18,7 @@ public abstract class ServerPlayerMixin {
 	/** Critical hits on a Skyrim actor are flagged so Skyrim can play them up. */
 	@Inject(method = "crit", at = @At("HEAD"))
 	private void vegascraft$critSkyrim(Entity entity, CallbackInfo ci) {
-		if (entity instanceof SkyrimActorEntity proxy) {
+		if (entity instanceof FNVActorEntity proxy) {
 			proxy.markCritical();
 		}
 	}

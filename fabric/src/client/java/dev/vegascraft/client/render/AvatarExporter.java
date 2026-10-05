@@ -9,7 +9,7 @@ import dev.vegascraft.client.mixin.RenderSetupAccessor;
 import dev.vegascraft.client.mixin.RenderTypeAccessor;
 import dev.vegascraft.client.mixin.TextureBindingAccessor;
 import dev.vegascraft.client.mixin.TextureManagerAccessor;
-import dev.vegascraft.combat.SkyrimActorEntity;
+import dev.vegascraft.combat.FNVActorEntity;
 import dev.vegascraft.link.Proto;
 import dev.vegascraft.link.VegasLink;
 import java.nio.ByteBuffer;
@@ -294,7 +294,7 @@ final class AvatarExporter implements SubmitNodeCollector {
 		PoseStack pose = new PoseStack();
 		int entities = 0;
 		for (Entity e : level.entitiesForRendering()) {
-			if (e == player || e instanceof ItemEntity || e instanceof AbstractArrow || e instanceof ItemSupplier || e instanceof SkyrimActorEntity
+			if (e == player || e instanceof ItemEntity || e instanceof AbstractArrow || e instanceof ItemSupplier || e instanceof FNVActorEntity
 				|| e.distanceToSqr(cam) > SCENE_RANGE * SCENE_RANGE || entities >= SCENE_MAX_ENTITIES) {
 				continue;
 			}

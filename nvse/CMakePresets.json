@@ -8,10 +8,20 @@
   "configurePresets": [
     {
       "name": "default",
-      "displayName": "Win32 Release (MSVC)",
-      "generator": "Visual Studio 17 2022",
+      "displayName": "Win32 Release (MSVC / VS 2026)",
+      "generator": "Visual Studio 18 2026",
       "architecture": "Win32",
       "binaryDir": "${sourceDir}/build",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "vs2022",
+      "displayName": "Win32 Release (MSVC / VS 2022)",
+      "generator": "Visual Studio 17 2022",
+      "architecture": "Win32",
+      "binaryDir": "${sourceDir}/build-vs2022",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release"
       }
@@ -21,6 +31,11 @@
     {
       "name": "release",
       "configurePreset": "default",
+      "configuration": "Release"
+    },
+    {
+      "name": "release-vs2022",
+      "configurePreset": "vs2022",
       "configuration": "Release"
     }
   ]
