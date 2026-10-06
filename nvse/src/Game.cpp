@@ -11,8 +11,6 @@ namespace vegascraft
 
 	bool Game::Init()
 	{
-		// Always kick Prism first — shared-memory setup must not block launch.
-		Launcher::StartMinecraft();
 		if (!link_.IsOpen()) {
 			if (!link_.Create()) {
 				Launcher::Logf("shared-memory Create failed");
@@ -20,6 +18,9 @@ namespace vegascraft
 			}
 			Launcher::Logf("shared-memory link created");
 		}
+		// Optional: Windows-native Prism auto-start (bStartWithHost=1). Under Proton,
+		// VegasCraft_boot.cmd owns Prism; ini sets bStartWithHost=0.
+		Launcher::StartMinecraft();
 		return true;
 	}
 

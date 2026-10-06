@@ -1,10 +1,8 @@
 #include "Launcher.h"
 
 #include <cstdarg>
-#include <chrono>
 #include <fstream>
 #include <mutex>
-#include <thread>
 
 namespace vegascraft::Launcher
 {
@@ -323,33 +321,32 @@ namespace vegascraft::Launcher
 		}
 
 		g_status = Status::kStarting;
-		std::thread([chosen, bundled, args] {
-			try {
-				std::filesystem::path program = !chosen.empty() ? std::filesystem::path(chosen) : std::filesystem::path{};
-				if (bundled) {
-					program = EnsureBundle();
-					if (program.empty()) {
-						g_status = Status::kFailed;
-						Logf("FAIL: EnsureBundle returned empty");
-						return;
-					}
-					if (!std::filesystem::exists(program.parent_path() / "accounts.json")) {
-						g_status = Status::kSignIn;
-						Logf("first run — Prism should show Microsoft sign-in");
-					}
-				}
-				if (!StartProcess(program, args)) {
+		// No std::thread here — C++ threads crash during NVSE plugin load under Proton.
+		try {
+			std::filesystem::path program = !chosen.empty() ? std::filesystem::path(chosen) : std::filesystem::path{};
+			if (bundled) {
+				program = EnsureBundle();
+				if (program.empty()) {
 					g_status = Status::kFailed;
+					Logf("FAIL: EnsureBundle returned empty");
 					return;
 				}
-				if (g_status != Status::kSignIn) {
-					g_status = Status::kRunning;
+				if (!std::filesystem::exists(program.parent_path() / "accounts.json")) {
+					g_status = Status::kSignIn;
+					Logf("first run — Prism should show Microsoft sign-in");
 				}
-			} catch (const std::exception& ex) {
-				Logf("exception in StartMinecraft thread: %s", ex.what());
-				g_status = Status::kFailed;
 			}
-		}).detach();
+			if (!StartProcess(program, args)) {
+				g_status = Status::kFailed;
+				return;
+			}
+			if (g_status != Status::kSignIn) {
+				g_status = Status::kRunning;
+			}
+		} catch (const std::exception& ex) {
+			Logf("exception in StartMinecraft: %s", ex.what());
+			g_status = Status::kFailed;
+		}
 	}
 
 	void StopMinecraft() {}
