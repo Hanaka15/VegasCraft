@@ -83,50 +83,41 @@ if [[ -f "$PLUGIN_INI" ]]; then
 	log "Set bStartWithHost=0 (Prism started by VegasCraft_boot.cmd)"
 fi
 
-# Exclusive fullscreen only (user-rejected borderless due to input lag).
-# iPresentInterval=0 kills vsync lag if anything forces windowed.
+# Windowed (bFull Screen=0). iPresentInterval=0 = no vsync lag.
 force_display_prefs() {
 	local docs="$COMPAT/pfx/drive_c/users/steamuser/Documents/My Games/FalloutNV"
 	local f
 	for f in "$docs/FalloutPrefs.ini" "$docs/Fallout.ini"; do
 		[[ -f "$f" ]] || continue
 		sed -i \
-			-e 's/^bFull Screen=.*/bFull Screen=1/' \
+			-e 's/^bFull Screen=.*/bFull Screen=0/' \
 			-e 's/^iPresentInterval=.*/iPresentInterval=0/' \
 			"$f" || true
-		log "Exclusive fullscreen prefs: $f"
+		log "Windowed prefs: $f"
 	done
 }
 force_display_prefs
 
-# Wayland: exclusive D3D9 FS is a 1x1 HWND. Boot uses a Wine virtual desktop
-# ("VegasCraft"); raise that desktop, hide Minecraft, clear Steam LD_PRELOAD.
+# Raise Fallout window; keep Minecraft unmapped. Clear Steam LD_PRELOAD for xdotool.
 start_fnv_focus_helper() {
 	local helper_log="${XDG_RUNTIME_DIR:-/tmp}/vegascraft-focus.log"
 	: >"$helper_log"
 	(
-		# Steam's 32-bit overlay preload breaks host xdotool.
 		unset LD_PRELOAD
 		export LD_PRELOAD=""
 		for _ in $(seq 1 90); do
 			sleep 1
 			if command -v xdotool >/dev/null 2>&1; then
-				# Keep MC from covering the Wine desktop / FNV surface.
 				xdotool search --name 'Minecraft' windowunmap 2>>"$helper_log" || true
 				xdotool search --name 'Prism Launcher' windowunmap 2>>"$helper_log" || true
-				# Virtual desktop title matches explorer /desktop=VegasCraft,...
-				for wid in $(xdotool search --name 'VegasCraft' 2>/dev/null); do
-					xdotool windowmap "$wid" windowactivate "$wid" windowraise "$wid" \
-						windowsize "$wid" 1920 1080 2>>"$helper_log" || true
-				done
 				for wid in $(xdotool search --name '^Fallout: New Vegas$' 2>/dev/null); do
-					xdotool windowactivate "$wid" windowraise "$wid" 2>>"$helper_log" || true
+					xdotool windowmap "$wid" windowactivate "$wid" windowraise "$wid" 2>>"$helper_log" || true
 				done
 			fi
 		done
 	) &
 	FOCUS_PID=$!
-	log "FNV focus helper pid=$FOCUS_PID (virtual desktop + hide MC)"
+	log "FNV focus helper pid=$FOCUS_PID (windowed)"
 }
 FOCUS_PID=0
 start_fnv_focus_helper
