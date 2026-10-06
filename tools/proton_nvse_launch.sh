@@ -13,7 +13,9 @@ set -euo pipefail
 FNV="${VEGASCRAFT_FNV:-$HOME/.local/share/Steam/steamapps/common/Fallout New Vegas enplczru}"
 GAME="$FNV/FalloutNV.exe"
 BOOT_CMD="$FNV/VegasCraft_boot.cmd"
+INNER_CMD="$FNV/VegasCraft_inner.cmd"
 REPO_BOOT="${VEGASCRAFT_REPO:-$HOME/VegasCraft}/tools/VegasCraft_boot.cmd"
+REPO_INNER="${VEGASCRAFT_REPO:-$HOME/VegasCraft}/tools/VegasCraft_inner.cmd"
 STEAM_LOADER="$FNV/nvse_steam_loader.dll"
 NVSE_DLL="$FNV/nvse_1_4.dll"
 ASI_LOADER="$FNV/dinput8.dll"
@@ -42,6 +44,9 @@ fi
 # Install boot cmd + ASI NVSE chainload
 if [[ -f "$REPO_BOOT" ]]; then
 	cp -f "$REPO_BOOT" "$BOOT_CMD"
+fi
+if [[ -f "$REPO_INNER" ]]; then
+	cp -f "$REPO_INNER" "$INNER_CMD"
 fi
 if [[ ! -f "$ASI_LOADER" && -f "$REPO_ASI" ]]; then
 	cp -f "$REPO_ASI" "$ASI_LOADER"
