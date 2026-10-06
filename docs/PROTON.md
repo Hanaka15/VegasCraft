@@ -43,7 +43,10 @@ you can — other code paths may still call `NetworkInterface`.
 
 ## Display
 
-On multi-monitor Proton setups, **exclusive fullscreen** (`bFull Screen=1`) often
-leaves Fallout running (audio + input) with a window you cannot restore once
-Prism/Java has touched the display. The launch script forces **borderless
-windowed** at 1920×1080 (`bFull Screen=0`) so the FNV window stays visible.
+Use **exclusive fullscreen** (`bFull Screen=1`) for acceptable input lag. The launch
+script also sets `iPresentInterval=0` (no vsync) — windowed/borderless with vsync
+on Proton feels like severe input delay.
+
+`VegasCraft_boot.cmd` starts Prism **minimized**, then Fallout with `/wait`, so FNV
+can take exclusive fullscreen after the launcher. Minecraft itself stays hidden
+(`-Dvegascraft.startHidden=true`).

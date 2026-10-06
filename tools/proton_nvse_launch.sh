@@ -78,25 +78,27 @@ if [[ -f "$PLUGIN_INI" ]]; then
 	log "Set bStartWithHost=0 (Prism started by VegasCraft_boot.cmd)"
 fi
 
-# Exclusive fullscreen + Prism/Java on multi-monitor Proton often leaves FNV
-# running with audio/input but no restorable window. Force borderless 1920x1080.
-force_borderless_window() {
+# Exclusive fullscreen for low input latency. Start Prism minimized and Fallout
+# last (see VegasCraft_boot.cmd) so FNV reclaims the display. Also force
+# iPresentInterval=0 — vsync in windowed/borderless feels like huge input lag.
+force_display_prefs() {
 	local docs="$COMPAT/pfx/drive_c/users/steamuser/Documents/My Games/FalloutNV"
 	local f
 	for f in "$docs/FalloutPrefs.ini" "$docs/Fallout.ini"; do
 		[[ -f "$f" ]] || continue
 		sed -i \
-			-e 's/^bFull Screen=.*/bFull Screen=0/' \
+			-e 's/^bFull Screen=.*/bFull Screen=1/' \
+			-e 's/^iPresentInterval=.*/iPresentInterval=0/' \
 			-e 's/^iLocation X=.*/iLocation X=0/' \
 			-e 's/^iLocation Y=.*/iLocation Y=0/' \
 			"$f" || true
 		if rg -q '^iSize W=' "$f"; then
 			sed -i -e 's/^iSize W=.*/iSize W=1920/' -e 's/^iSize H=.*/iSize H=1080/' "$f" || true
 		fi
-		log "Borderless windowed prefs: $f"
+		log "Fullscreen + no-vsync prefs: $f"
 	done
 }
-force_borderless_window
+force_display_prefs
 
 export WINEDLLOVERRIDES="${WINEDLLOVERRIDES:+$WINEDLLOVERRIDES;}dinput8.dll=n,b;nvse_steam_loader.dll=n,b;nvse_1_4.dll=n,b"
 export STEAM_COMPAT_DATA_PATH="${STEAM_COMPAT_DATA_PATH:-$COMPAT}"
