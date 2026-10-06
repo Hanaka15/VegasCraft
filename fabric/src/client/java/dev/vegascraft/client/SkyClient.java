@@ -457,8 +457,6 @@ public final class SkyClient {
 	}
 
 	private static void applyViewportSize(Minecraft minecraft) {
-		// Resizing via setWindowed re-shows the SDL window under Proton and steals
-		// exclusive fullscreen from FNV. Keep an offscreen FBO size only.
 		int w = Math.min(sky.viewportW, Proto.MAX_OVERLAY_W);
 		int h = Math.min(sky.viewportH, Proto.MAX_OVERLAY_H);
 		if (w <= 0 || h <= 0 || (w == appliedViewportW && h == appliedViewportH)) {
@@ -466,9 +464,10 @@ public final class SkyClient {
 		}
 		appliedViewportW = w;
 		appliedViewportH = h;
-		if (SHOW_WINDOW) {
-			minecraft.getWindow().setWindowed(w, h);
-		}
-		VegasCraft.LOG.info("VegasCraft: overlay viewport {}x{} (window kept hidden={})", w, h, !SHOW_WINDOW);
+		// Need the MC framebuffer at FNV size for a sharp overlay. setWindowed may
+		// briefly map the SDL window under Proton — hide it again immediately.
+		minecraft.getWindow().setWindowed(w, h);
+		hideWindowOnce(minecraft);
+		VegasCraft.LOG.info("VegasCraft: overlay viewport {}x{} (hidden={})", w, h, !SHOW_WINDOW);
 	}
 }

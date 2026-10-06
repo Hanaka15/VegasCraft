@@ -23,5 +23,6 @@ namespace vegascraft
 		bool loggedOk_{ false };
 		bool loggedFail_{ false };
 		bool disabled_{ false };
+		std::uint32_t failStreak_{ 0 };
 	};
 }

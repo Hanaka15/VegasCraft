@@ -8,7 +8,6 @@ namespace vegascraft
 	namespace
 	{
 		// FalloutNV 1.4.0.525 — NiDX9Renderer singleton + IDirect3DDevice9* field.
-		// (Same layout NVTF / Gamebryo FO3-NV use: device sits at +0x280 after NiRenderer.)
 		constexpr std::uintptr_t kNiDX9RendererSingleton = 0x11C73B4;
 		constexpr std::uintptr_t kDeviceOffset = 0x280;
 
@@ -31,7 +30,6 @@ namespace vegascraft
 				if (!devicePtr || !*devicePtr) {
 					return nullptr;
 				}
-				// Basic COM sanity: vtable pointer should be in user address space.
 				const auto* vtable = *reinterpret_cast<const void* const*>(*devicePtr);
 				if (!vtable || reinterpret_cast<std::uintptr_t>(vtable) < 0x10000) {
 					return nullptr;
@@ -68,9 +66,10 @@ namespace vegascraft
 		}
 
 		IDirect3DTexture9* tex = nullptr;
-		HRESULT hr = device->CreateTexture(w, h, 1, D3DUSAGE_DYNAMIC, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &tex, nullptr);
+		// Prefer MANAGED under Wine/Proton — DYNAMIC+DEFAULT often fails or AVs on Lock.
+		HRESULT hr = device->CreateTexture(w, h, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &tex, nullptr);
 		if (FAILED(hr) || !tex) {
-			hr = device->CreateTexture(w, h, 1, 0, D3DFMT_A8R8G8B8, D3DPOOL_MANAGED, &tex, nullptr);
+			hr = device->CreateTexture(w, h, 1, D3DUSAGE_DYNAMIC, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &tex, nullptr);
 		}
 		if (FAILED(hr) || !tex) {
 			Launcher::Logf("Compositor: CreateTexture %ux%u failed hr=%08lX", w, h, static_cast<unsigned long>(hr));
@@ -109,11 +108,9 @@ namespace vegascraft
 
 		auto* tex = static_cast<IDirect3DTexture9*>(staging_);
 		D3DLOCKED_RECT locked{};
-		const DWORD lockFlags = D3DLOCK_DISCARD;
-		if (FAILED(tex->LockRect(0, &locked, nullptr, lockFlags))) {
-			if (FAILED(tex->LockRect(0, &locked, nullptr, 0))) {
-				return false;
-			}
+		if (FAILED(tex->LockRect(0, &locked, nullptr, 0))) {
+			Launcher::Logf("Compositor: LockRect failed");
+			return false;
 		}
 
 		const std::uint8_t* srcBase = base + proto::kOffOverlayPixels + mid * proto::kOverlaySlotBytes;
@@ -132,6 +129,7 @@ namespace vegascraft
 
 		IDirect3DSurface9* back = nullptr;
 		if (FAILED(device->GetBackBuffer(0, 0, D3DBACKBUFFER_TYPE_MONO, &back)) || !back) {
+			Launcher::Logf("Compositor: GetBackBuffer failed");
 			return false;
 		}
 		D3DSURFACE_DESC bb{};
@@ -140,14 +138,24 @@ namespace vegascraft
 
 		const float bw = static_cast<float>(bb.Width);
 		const float bh = static_cast<float>(bb.Height);
+		// Half-pixel offset for D3D9 rasterization.
 		OverlayVertex quad[4] = {
-			{ 0.f, 0.f, 0.f, 1.f, 0.f, 0.f },
-			{ bw, 0.f, 0.f, 1.f, 1.f, 0.f },
-			{ 0.f, bh, 0.f, 1.f, 0.f, 1.f },
-			{ bw, bh, 0.f, 1.f, 1.f, 1.f },
+			{ -0.5f, -0.5f, 0.f, 1.f, 0.f, 0.f },
+			{ bw - 0.5f, -0.5f, 0.f, 1.f, 1.f, 0.f },
+			{ -0.5f, bh - 0.5f, 0.f, 1.f, 0.f, 1.f },
+			{ bw - 0.5f, bh - 0.5f, 0.f, 1.f, 1.f, 1.f },
 		};
 
+		IDirect3DVertexShader9* oldVs = nullptr;
+		IDirect3DPixelShader9* oldPs = nullptr;
+		IDirect3DVertexDeclaration9* oldDecl = nullptr;
 		DWORD oldZ = 0, oldAlpha = 0, oldSrc = 0, oldDst = 0, oldFog = 0, oldLighting = 0, oldCull = 0;
+		DWORD oldColorOp = 0, oldColorArg1 = 0, oldAlphaOp = 0, oldAlphaArg1 = 0, oldAlphaArg2 = 0;
+		DWORD oldScissor = 0, oldSrgb = 0;
+
+		device->GetVertexShader(&oldVs);
+		device->GetPixelShader(&oldPs);
+		device->GetVertexDeclaration(&oldDecl);
 		device->GetRenderState(D3DRS_ZENABLE, &oldZ);
 		device->GetRenderState(D3DRS_ALPHABLENDENABLE, &oldAlpha);
 		device->GetRenderState(D3DRS_SRCBLEND, &oldSrc);
@@ -155,19 +163,61 @@ namespace vegascraft
 		device->GetRenderState(D3DRS_FOGENABLE, &oldFog);
 		device->GetRenderState(D3DRS_LIGHTING, &oldLighting);
 		device->GetRenderState(D3DRS_CULLMODE, &oldCull);
+		device->GetRenderState(D3DRS_SCISSORTESTENABLE, &oldScissor);
+		device->GetRenderState(D3DRS_SRGBWRITEENABLE, &oldSrgb);
+		device->GetTextureStageState(0, D3DTSS_COLOROP, &oldColorOp);
+		device->GetTextureStageState(0, D3DTSS_COLORARG1, &oldColorArg1);
+		device->GetTextureStageState(0, D3DTSS_ALPHAOP, &oldAlphaOp);
+		device->GetTextureStageState(0, D3DTSS_ALPHAARG1, &oldAlphaArg1);
+		device->GetTextureStageState(0, D3DTSS_ALPHAARG2, &oldAlphaArg2);
 
+		// Present hook is usually after EndScene — must BeginScene to draw.
+		const HRESULT beginHr = device->BeginScene();
+
+		device->SetVertexShader(nullptr);
+		device->SetPixelShader(nullptr);
+		device->SetVertexDeclaration(nullptr);
+		device->SetFVF(kFvf);
 		device->SetRenderState(D3DRS_ZENABLE, FALSE);
+		device->SetRenderState(D3DRS_ZWRITEENABLE, FALSE);
 		device->SetRenderState(D3DRS_ALPHABLENDENABLE, TRUE);
 		device->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
 		device->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
 		device->SetRenderState(D3DRS_FOGENABLE, FALSE);
 		device->SetRenderState(D3DRS_LIGHTING, FALSE);
 		device->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
+		device->SetRenderState(D3DRS_SCISSORTESTENABLE, FALSE);
+		device->SetRenderState(D3DRS_SRGBWRITEENABLE, FALSE);
+		device->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
+		device->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+		device->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_MODULATE);
+		device->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
+		device->SetTextureStageState(0, D3DTSS_ALPHAARG2, D3DTA_DIFFUSE);
 		device->SetTexture(0, tex);
-		device->SetFVF(kFvf);
-		device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, quad, sizeof(OverlayVertex));
+		device->SetSamplerState(0, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
+		device->SetSamplerState(0, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
+		device->SetSamplerState(0, D3DSAMP_ADDRESSU, D3DTADDRESS_CLAMP);
+		device->SetSamplerState(0, D3DSAMP_ADDRESSV, D3DTADDRESS_CLAMP);
+
+		const HRESULT drawHr = device->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, quad, sizeof(OverlayVertex));
 		device->SetTexture(0, nullptr);
 
+		if (SUCCEEDED(beginHr)) {
+			device->EndScene();
+		}
+
+		device->SetVertexShader(oldVs);
+		device->SetPixelShader(oldPs);
+		device->SetVertexDeclaration(oldDecl);
+		if (oldVs) {
+			oldVs->Release();
+		}
+		if (oldPs) {
+			oldPs->Release();
+		}
+		if (oldDecl) {
+			oldDecl->Release();
+		}
 		device->SetRenderState(D3DRS_ZENABLE, oldZ);
 		device->SetRenderState(D3DRS_ALPHABLENDENABLE, oldAlpha);
 		device->SetRenderState(D3DRS_SRCBLEND, oldSrc);
@@ -175,6 +225,18 @@ namespace vegascraft
 		device->SetRenderState(D3DRS_FOGENABLE, oldFog);
 		device->SetRenderState(D3DRS_LIGHTING, oldLighting);
 		device->SetRenderState(D3DRS_CULLMODE, oldCull);
+		device->SetRenderState(D3DRS_SCISSORTESTENABLE, oldScissor);
+		device->SetRenderState(D3DRS_SRGBWRITEENABLE, oldSrgb);
+		device->SetTextureStageState(0, D3DTSS_COLOROP, oldColorOp);
+		device->SetTextureStageState(0, D3DTSS_COLORARG1, oldColorArg1);
+		device->SetTextureStageState(0, D3DTSS_ALPHAOP, oldAlphaOp);
+		device->SetTextureStageState(0, D3DTSS_ALPHAARG1, oldAlphaArg1);
+		device->SetTextureStageState(0, D3DTSS_ALPHAARG2, oldAlphaArg2);
+
+		if (FAILED(drawHr)) {
+			Launcher::Logf("Compositor: DrawPrimitiveUP hr=%08lX", static_cast<unsigned long>(drawHr));
+			return false;
+		}
 
 		if (!loggedOk_) {
 			loggedOk_ = true;
@@ -200,15 +262,23 @@ namespace vegascraft
 			ok = BlitOnce(link, device);
 		} __except (EXCEPTION_EXECUTE_HANDLER) {
 			ok = false;
+			if (!loggedFail_) {
+				Launcher::Logf("Compositor: blit AV/exception code=%08lX", static_cast<unsigned long>(GetExceptionCode()));
+			}
 		}
 
 		if (!ok) {
-			if (!loggedFail_) {
-				loggedFail_ = true;
-				Launcher::Logf("Compositor: blit failed — disabling overlay to keep FNV stable");
+			++failStreak_;
+			if (failStreak_ >= 8) {
+				if (!loggedFail_) {
+					loggedFail_ = true;
+					Launcher::Logf("Compositor: blit failed %u times — disabling overlay", failStreak_);
+				}
+				disabled_ = true;
+				Shutdown();
 			}
-			disabled_ = true;
-			Shutdown();
+			return;
 		}
+		failStreak_ = 0;
 	}
 }
