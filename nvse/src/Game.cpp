@@ -8,14 +8,6 @@
 
 namespace vegascraft
 {
-	namespace
-	{
-		// Only treat huge jumps as FNV-driven teleports (doors / load / fast travel).
-		// Console SetPos is imprecise under Proton — a low threshold storms teleportSeq and
-		// freezes Minecraft in holdUntilReady forever.
-		constexpr double kFnvTeleportThreshold = 2048.0;
-	}
-
 	Game& Game::Get()
 	{
 		static Game g;
@@ -78,25 +70,11 @@ namespace vegascraft
 			haveLastFnv_ = true;
 		}
 
-		const auto fnvMc = coords::FnvToMc(
-			haveLastFnv_ ? lastFnvX_ : 0.0,
-			haveLastFnv_ ? lastFnvY_ : 0.0,
-			haveLastFnv_ ? lastFnvZ_ : 128.0);
-
+		// Minecraft movement is authoritative (SkyCraft). Console SetPos lags badly under Proton,
+		// so never treat "FNV position != MC feet" as a world teleport — that stormed teleportSeq
+		// every 1–2s, froze MC, and dropped the player through the floor.
 		const bool arriving = haveMc && mcInWorld && mc.teleportAck != teleportSeq_;
 		const bool puppet = inGame_ && mcInWorld && haveMc && mc.teleportAck == teleportSeq_;
-
-		// Detect FNV-driven moves only while we are already puppeting (SkyCraft compares to lastSetPos).
-		if (puppet && haveFnv && haveLastPuppetFnv_) {
-			const double dx = fnvX - lastPuppetFnvX_;
-			const double dy = fnvY - lastPuppetFnvY_;
-			const double dz = fnvZ - lastPuppetFnvZ_;
-			if (dx * dx + dy * dy + dz * dz > kFnvTeleportThreshold * kFnvTeleportThreshold) {
-				teleportPending_ = true;
-				haveLastPuppetFnv_ = false;
-				Launcher::Logf("FNV moved player (%.0f units); teleport pending", std::sqrt(dx * dx + dy * dy + dz * dz));
-			}
-		}
 
 		if (teleportPending_ && inGame_ && haveLastFnv_) {
 			++teleportSeq_;
@@ -104,17 +82,12 @@ namespace vegascraft
 			lookYaw_ = coords::FnvYawToMc(fnvYawDeg);
 			lookPitch_ = coords::FnvPitchToMc(fnvPitchDeg);
 			lookInitialized_ = true;
-			lastPuppetFnvX_ = lastFnvX_;
-			lastPuppetFnvY_ = lastFnvY_;
-			lastPuppetFnvZ_ = lastFnvZ_;
-			haveLastPuppetFnv_ = true;
+			const auto fnvMc = coords::FnvToMc(lastFnvX_, lastFnvY_, lastFnvZ_);
 			Launcher::Logf(
 				"teleportSeq=%u → MC (%.1f, %.1f, %.1f) from FNV (%.0f, %.0f, %.0f)",
 				teleportSeq_, fnvMc.x, fnvMc.y, fnvMc.z, lastFnvX_, lastFnvY_, lastFnvZ_);
 		}
 
-		// While MC is in the mirror world, FNV always hands the player to Minecraft (SkyCraft).
-		// Sticky across brief seqlock misses so WASD key edges aren't dropped mid-stride.
 		if (inGame_ && mcInWorld) {
 			mcLinkedSticky_ = true;
 			ownsMisses_ = 0;
@@ -150,13 +123,30 @@ namespace vegascraft
 			camera_.UpdateLook(lookYaw_, lookPitch_);
 		}
 
+		// HostState.pos: while Minecraft drives the player, report MC feet (SkyCraft writes the
+		// host body after SetPosition — our console SetPos lags, so echo MC instead of stale FNV).
+		double hostX, hostY, hostZ;
+		if (puppet && haveMc) {
+			hostX = mc.x;
+			hostY = mc.y;
+			hostZ = mc.z;
+		} else {
+			const auto fnvMc = coords::FnvToMc(
+				haveLastFnv_ ? lastFnvX_ : 0.0,
+				haveLastFnv_ ? lastFnvY_ : 0.0,
+				haveLastFnv_ ? lastFnvZ_ : 128.0);
+			hostX = fnvMc.x;
+			hostY = fnvMc.y;
+			hostZ = fnvMc.z;
+		}
+
 		proto::HostState host{};
 		host.flags = inGame_ ? proto::kHostInGame : 0;
 		host.worldId = context_.WorldId();
 		host.collisionEpoch = exporter_.Epoch();
-		host.posX = fnvMc.x;
-		host.posY = fnvMc.y;
-		host.posZ = fnvMc.z;
+		host.posX = hostX;
+		host.posY = hostY;
+		host.posZ = hostZ;
 		host.yaw = lookInitialized_ ? lookYaw_ : 0.f;
 		host.pitch = lookInitialized_ ? lookPitch_ : 0.f;
 		host.teleportSeq = teleportSeq_;
@@ -185,10 +175,9 @@ namespace vegascraft
 			skills_.OnMcSneakTick();
 		}
 
+		// Collision always follows Minecraft feet while linked — that's who is walking.
 		double exportX = lastFnvX_, exportY = lastFnvY_, exportZ = lastFnvZ_;
-		if ((puppet || arriving) && haveMc) {
-			// While MC is arriving/held, centre the floor on its feet (Host teleport target /
-			// current MC pos), not a stale FNV read — otherwise hold never sees ground.
+		if (haveMc && mcInWorld) {
 			const auto feet = coords::McToFnv(mc.x, mc.y, mc.z);
 			exportX = feet.x;
 			exportY = feet.y;

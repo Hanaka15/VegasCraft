@@ -26,14 +26,14 @@ namespace vegascraft
 
 		bool keyDown[256]{};
 		bool mouseDown[5]{};
-		POINT lastCursor{};
-		bool haveCursor = false;
 		float lookDx = 0.f;
 		float lookDy = 0.f;
 		bool logged = false;
 		bool wasOwning = false;
 
 		std::atomic<int> scrollAccum{ 0 };
+		std::atomic<int> rawLookDx{ 0 };
+		std::atomic<int> rawLookDy{ 0 };
 		WNDPROC prevWndProc = nullptr;
 		HWND hookedHwnd = nullptr;
 
@@ -49,6 +49,16 @@ namespace vegascraft
 					const auto flags = raw.data.mouse.usButtonFlags;
 					if (flags & RI_MOUSE_WHEEL) {
 						scrollAccum.fetch_add(static_cast<SHORT>(raw.data.mouse.usButtonData), std::memory_order_relaxed);
+					}
+					// Relative deltas keep working at the screen edge (GetCursorPos does not —
+					// that was capping look at ~90°). Same idea as SkyCraft's mouseInputX/Y.
+					if ((raw.data.mouse.usFlags & MOUSE_MOVE_ABSOLUTE) == 0) {
+						if (raw.data.mouse.lLastX != 0) {
+							rawLookDx.fetch_add(raw.data.mouse.lLastX, std::memory_order_relaxed);
+						}
+						if (raw.data.mouse.lLastY != 0) {
+							rawLookDy.fetch_add(raw.data.mouse.lLastY, std::memory_order_relaxed);
+						}
 					}
 				}
 			}
@@ -101,14 +111,28 @@ namespace vegascraft
 
 			RAWINPUTDEVICE rid{};
 			rid.usUsagePage = 0x01;
-			rid.usUsage = 0x02;  // mouse
+			rid.usUsage = 0x02;
 			rid.dwFlags = RIDEV_INPUTSINK;
 			rid.hwndTarget = hwnd;
 			if (::RegisterRawInputDevices(&rid, 1, sizeof(rid))) {
-				Launcher::Logf("InputBridge: WM_MOUSEWHEEL + Raw Input on hwnd %p", hwnd);
+				Launcher::Logf("InputBridge: Raw Input look+scroll on hwnd %p", hwnd);
 			} else {
 				Launcher::Logf("InputBridge: window subclass ok, Raw Input failed err=%lu", ::GetLastError());
 			}
+		}
+
+		void RecenterCursor()
+		{
+			if (!hookedHwnd) {
+				return;
+			}
+			RECT rc{};
+			if (!::GetClientRect(hookedHwnd, &rc)) {
+				return;
+			}
+			POINT mid{ (rc.left + rc.right) / 2, (rc.top + rc.bottom) / 2 };
+			::ClientToScreen(hookedHwnd, &mid);
+			::SetCursorPos(mid.x, mid.y);
 		}
 
 		bool IsAllowListedVk(int vk)
@@ -173,8 +197,8 @@ namespace vegascraft
 				Push(link, proto::kInReleaseAll, 0, 0);
 			}
 			wasOwning = false;
-			haveCursor = false;
-			// Forget edges so a re-press after regain is seen as a new down.
+			rawLookDx.store(0, std::memory_order_relaxed);
+			rawLookDy.store(0, std::memory_order_relaxed);
 			std::memset(keyDown, 0, sizeof(keyDown));
 			std::memset(mouseDown, 0, sizeof(mouseDown));
 			return;
@@ -182,10 +206,12 @@ namespace vegascraft
 
 		if (!wasOwning) {
 			wasOwning = true;
-			haveCursor = false;
 			std::memset(keyDown, 0, sizeof(keyDown));
 			std::memset(mouseDown, 0, sizeof(mouseDown));
-			Launcher::Logf("InputBridge: Minecraft owns — forwarding Win32 input");
+			rawLookDx.store(0, std::memory_order_relaxed);
+			rawLookDy.store(0, std::memory_order_relaxed);
+			RecenterCursor();
+			Launcher::Logf("InputBridge: Minecraft owns — Raw Input look (SkyCraft-style)");
 		}
 		if (!logged) {
 			logged = true;
@@ -221,16 +247,18 @@ namespace vegascraft
 			pendingScroll_ = 0;
 		}
 
-		POINT cur{};
-		if (::GetCursorPos(&cur)) {
-			if (haveCursor && mode_ != Mode::McScreen) {
-				lookDx += static_cast<float>(cur.x - lastCursor.x);
-				lookDy += static_cast<float>(cur.y - lastCursor.y);
-			} else if (haveCursor && mode_ == Mode::McScreen) {
+		if (mode_ != Mode::McScreen) {
+			lookDx += static_cast<float>(rawLookDx.exchange(0, std::memory_order_relaxed));
+			lookDy += static_cast<float>(rawLookDy.exchange(0, std::memory_order_relaxed));
+			// Keep the OS cursor centered so absolute fallbacks never pin at the edge.
+			RecenterCursor();
+		} else {
+			POINT cur{};
+			if (::GetCursorPos(&cur)) {
 				Push(link, proto::kInCursor, 0, cur.x, cur.y);
 			}
-			lastCursor = cur;
-			haveCursor = true;
+			rawLookDx.store(0, std::memory_order_relaxed);
+			rawLookDy.store(0, std::memory_order_relaxed);
 		}
 	}
 }
