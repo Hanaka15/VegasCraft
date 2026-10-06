@@ -1,8 +1,9 @@
 #include "Launcher.h"
 
 #include <cstdarg>
+#include <cstdio>
+#include <cwchar>
 #include <fstream>
-#include <mutex>
 
 namespace vegascraft::Launcher
 {
@@ -10,7 +11,6 @@ namespace vegascraft::Launcher
 	{
 		std::atomic<Status> g_status{ Status::kOff };
 		std::filesystem::path g_gameDir;
-		std::mutex g_logMutex;
 
 		std::filesystem::path LogPath()
 		{
@@ -245,23 +245,39 @@ namespace vegascraft::Launcher
 		std::vsnprintf(buf, sizeof(buf), fmt, ap);
 		va_end(ap);
 
-		std::lock_guard lock(g_logMutex);
-		std::fprintf(stderr, "[VegasCraft] %s\n", buf);
-		OutputDebugStringA((std::string("[VegasCraft] ") + buf + "\n").c_str());
-		std::error_code ec;
-		std::filesystem::create_directories(LogPath().parent_path(), ec);
-		if (std::ofstream out(LogPath(), std::ios::app); out) {
-			SYSTEMTIME st{};
-			::GetLocalTime(&st);
-			out << st.wYear << '-' << st.wMonth << '-' << st.wDay << ' ' << st.wHour << ':' << st.wMinute << ':'
-				<< st.wSecond << " " << buf << '\n';
+		char line[2200];
+		SYSTEMTIME st{};
+		::GetLocalTime(&st);
+		std::snprintf(line, sizeof(line), "%u-%u-%u %u:%u:%u %s\r\n",
+			(unsigned)st.wYear, (unsigned)st.wMonth, (unsigned)st.wDay,
+			(unsigned)st.wHour, (unsigned)st.wMinute, (unsigned)st.wSecond, buf);
+
+		::OutputDebugStringA(line);
+
+		// Win32-only I/O — avoid iostream/filesystem/mutex during early NVSE load under Wine.
+		wchar_t path[MAX_PATH * 2]{};
+		if (!g_gameDir.empty()) {
+			std::swprintf(path, std::size(path), L"%s\\Data\\NVSE\\Plugins\\VegasCraft.log", g_gameDir.c_str());
+		} else {
+			std::wcscpy(path, L"VegasCraft.log");
+		}
+
+		const HANDLE file = ::CreateFileW(path, FILE_APPEND_DATA, FILE_SHARE_READ, nullptr, OPEN_ALWAYS,
+			FILE_ATTRIBUTE_NORMAL, nullptr);
+		if (file != INVALID_HANDLE_VALUE) {
+			DWORD written = 0;
+			::WriteFile(file, line, static_cast<DWORD>(std::strlen(line)), &written, nullptr);
+			::CloseHandle(file);
 		}
 	}
 
-	void SetGameDirectory(std::filesystem::path dir)
+	void SetGameDirectory(const char* dir)
 	{
-		g_gameDir = std::move(dir);
-		Logf("game directory: %s", g_gameDir.string().c_str());
+		if (!dir || !dir[0]) {
+			return;
+		}
+		g_gameDir = dir;
+		Logf("game directory: %s", dir);
 	}
 
 	Status GetStatus()

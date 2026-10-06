@@ -2,37 +2,48 @@
 
 #include "nvse/PluginAPI.h"
 
-#include <filesystem>
+#include <cstring>
 
 namespace
 {
 	PluginHandle g_pluginHandle = kPluginHandle_Invalid;
 	NVSEMessagingInterface* g_messaging = nullptr;
+	const NVSEInterface* g_nvse = nullptr;
 	bool g_bridgeReady = false;
 
-	void EnsureGameDir(const NVSEInterface* nvse)
+	void EnsureGameDir()
 	{
-		std::filesystem::path dir;
-		if (nvse && nvse->GetRuntimeDirectory) {
-			dir = nvse->GetRuntimeDirectory();
+		char dir[MAX_PATH]{};
+		if (g_nvse && g_nvse->GetRuntimeDirectory) {
+			const char* runtime = g_nvse->GetRuntimeDirectory();
+			if (runtime && runtime[0]) {
+				std::strncpy(dir, runtime, MAX_PATH - 1);
+			}
 		}
-		if (dir.empty()) {
-			wchar_t mod[MAX_PATH]{};
-			::GetModuleFileNameW(nullptr, mod, MAX_PATH);
-			dir = std::filesystem::path(mod).parent_path();
+		if (!dir[0]) {
+			char mod[MAX_PATH]{};
+			::GetModuleFileNameA(nullptr, mod, MAX_PATH);
+			std::strncpy(dir, mod, MAX_PATH - 1);
+			if (char* slash = std::strrchr(dir, '\\')) {
+				*slash = '\0';
+			} else if (char* slash = std::strrchr(dir, '/')) {
+				*slash = '\0';
+			}
 		}
-		vegascraft::Launcher::SetGameDirectory(std::move(dir));
+		vegascraft::Launcher::SetGameDirectory(dir);
 	}
 
 	void EnsureBridge(const char* reason)
 	{
+		if (!g_bridgeReady) {
+			EnsureGameDir();
+		}
 		vegascraft::Launcher::Logf("EnsureBridge (%s) ready=%d", reason, g_bridgeReady ? 1 : 0);
 		if (g_bridgeReady) {
 			return;
 		}
 		g_bridgeReady = true;
-		// Shared memory only — Prism is started by VegasCraft_boot.cmd under Proton
-		// (and optionally by Launcher::StartMinecraft when bStartWithHost=1 on Windows).
+		// Shared memory only — Prism is started by VegasCraft_boot.cmd under Proton.
 		if (!vegascraft::Game::Get().Init()) {
 			vegascraft::Launcher::Logf("WARNING: Game::Init failed (%s)", reason);
 			g_bridgeReady = false;
@@ -82,7 +93,7 @@ extern "C" __declspec(dllexport) bool NVSEPlugin_Query(const NVSEInterface* nvse
 {
 	info->infoVersion = PluginInfo::kInfoVersion;
 	info->name = "VegasCraft";
-	info->version = 3;
+	info->version = 4;
 
 	if (nvse->isEditor) {
 		return false;
@@ -98,27 +109,22 @@ extern "C" __declspec(dllexport) bool NVSEPlugin_Query(const NVSEInterface* nvse
 
 extern "C" __declspec(dllexport) bool NVSEPlugin_Load(const NVSEInterface* nvse)
 {
-	// Keep Load minimal: no std::thread (crashes under Proton/Wine during NVSE Load).
+	// Proton-safe Load: no std::thread, no std::filesystem, no file logging here.
+	// Heavy init runs on NVSE messaging (PostLoad / DeferredInit).
+	g_nvse = nvse;
 	g_pluginHandle = nvse->GetPluginHandle();
-	EnsureGameDir(nvse);
-	vegascraft::Launcher::Logf("NVSEPlugin_Load ok handle=%u", g_pluginHandle);
 
 	g_messaging = static_cast<NVSEMessagingInterface*>(nvse->QueryInterface(kInterface_Messaging));
 	if (g_messaging) {
 		g_messaging->RegisterListener(g_pluginHandle, "NVSE", MessageHandler);
-		vegascraft::Launcher::Logf("messaging listener registered");
 	} else {
-		vegascraft::Launcher::Logf("WARNING: messaging interface null");
 		EnsureBridge("Load-no-messaging");
 	}
 
 	return true;
 }
 
-BOOL APIENTRY DllMain(HMODULE, DWORD reason, LPVOID)
+BOOL APIENTRY DllMain(HMODULE, DWORD, LPVOID)
 {
-	if (reason == DLL_PROCESS_DETACH) {
-		vegascraft::Game::Get().Shutdown();
-	}
 	return TRUE;
 }

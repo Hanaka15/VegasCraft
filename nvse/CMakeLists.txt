@@ -10,7 +10,8 @@ if(MSVC)
 	if(CMAKE_SIZEOF_VOID_P EQUAL 8)
 		message(FATAL_ERROR "VegasCraft NVSE plugin must be built as Win32 (32-bit). Use -A Win32.")
 	endif()
-	set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>DLL")
+	# Static CRT: MSVCP140/filesystem under Wine/Proton crashes during NVSE Load.
+	set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 endif()
 
 file(GLOB VEGASCRAFT_SOURCES CONFIGURE_DEPENDS src/*.cpp src/*.h)

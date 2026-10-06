@@ -18,7 +18,7 @@ namespace vegascraft::Launcher
 		kFailed,
 	};
 
-	void SetGameDirectory(std::filesystem::path dir);
+	void SetGameDirectory(const char* dir);
 	Status GetStatus();
 	bool MinecraftRunning();
 
