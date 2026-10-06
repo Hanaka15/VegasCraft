@@ -30,31 +30,84 @@ namespace vegascraft
 		bool haveCursor = false;
 		float lookDx = 0.f;
 		float lookDy = 0.f;
-		float sensitivity = 0.5f;
 		bool logged = false;
+		bool wasOwning = false;
 
 		std::atomic<int> scrollAccum{ 0 };
-		HHOOK mouseHook = nullptr;
+		WNDPROC prevWndProc = nullptr;
+		HWND hookedHwnd = nullptr;
 
-		LRESULT CALLBACK LowLevelMouseProc(int code, WPARAM wParam, LPARAM lParam)
+		LRESULT CALLBACK InputWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
 		{
-			if (code == HC_ACTION && wParam == WM_MOUSEWHEEL) {
-				const auto* info = reinterpret_cast<MSLLHOOKSTRUCT*>(lParam);
-				scrollAccum.fetch_add(GET_WHEEL_DELTA_WPARAM(info->mouseData), std::memory_order_relaxed);
+			if (msg == WM_MOUSEWHEEL) {
+				scrollAccum.fetch_add(GET_WHEEL_DELTA_WPARAM(wParam), std::memory_order_relaxed);
+			} else if (msg == WM_INPUT) {
+				RAWINPUT raw{};
+				UINT size = sizeof(raw);
+				if (::GetRawInputData(reinterpret_cast<HRAWINPUT>(lParam), RID_INPUT, &raw, &size, sizeof(RAWINPUTHEADER)) >= sizeof(RAWINPUTHEADER)
+					&& raw.header.dwType == RIM_TYPEMOUSE) {
+					const auto flags = raw.data.mouse.usButtonFlags;
+					if (flags & RI_MOUSE_WHEEL) {
+						scrollAccum.fetch_add(static_cast<SHORT>(raw.data.mouse.usButtonData), std::memory_order_relaxed);
+					}
+				}
 			}
-			return ::CallNextHookEx(mouseHook, code, wParam, lParam);
+			return prevWndProc ? ::CallWindowProcW(prevWndProc, hwnd, msg, wParam, lParam)
+							   : ::DefWindowProcW(hwnd, msg, wParam, lParam);
 		}
 
-		void EnsureMouseHook()
+		HWND FindGameHwnd()
 		{
-			if (mouseHook) {
+			struct Ctx
+			{
+				DWORD pid;
+				HWND best;
+				int bestArea;
+			} ctx{ ::GetCurrentProcessId(), nullptr, 0 };
+			::EnumWindows(
+				[](HWND hwnd, LPARAM lp) -> BOOL {
+					auto* c = reinterpret_cast<Ctx*>(lp);
+					DWORD pid = 0;
+					::GetWindowThreadProcessId(hwnd, &pid);
+					if (pid != c->pid || !::IsWindowVisible(hwnd)) {
+						return TRUE;
+					}
+					RECT rc{};
+					if (!::GetClientRect(hwnd, &rc)) {
+						return TRUE;
+					}
+					const int area = (rc.right - rc.left) * (rc.bottom - rc.top);
+					if (area > c->bestArea && (rc.right - rc.left) >= 320) {
+						c->bestArea = area;
+						c->best = hwnd;
+					}
+					return TRUE;
+				},
+				reinterpret_cast<LPARAM>(&ctx));
+			return ctx.best;
+		}
+
+		void EnsureWindowHook()
+		{
+			HWND hwnd = FindGameHwnd();
+			if (!hwnd || hwnd == hookedHwnd) {
 				return;
 			}
-			mouseHook = ::SetWindowsHookExW(WH_MOUSE_LL, LowLevelMouseProc, ::GetModuleHandleW(nullptr), 0);
-			if (mouseHook) {
-				Launcher::Logf("InputBridge: WH_MOUSE_LL hook installed for scroll");
+			if (hookedHwnd && prevWndProc) {
+				::SetWindowLongPtrW(hookedHwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(prevWndProc));
+			}
+			prevWndProc = reinterpret_cast<WNDPROC>(::SetWindowLongPtrW(hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(InputWndProc)));
+			hookedHwnd = hwnd;
+
+			RAWINPUTDEVICE rid{};
+			rid.usUsagePage = 0x01;
+			rid.usUsage = 0x02;  // mouse
+			rid.dwFlags = RIDEV_INPUTSINK;
+			rid.hwndTarget = hwnd;
+			if (::RegisterRawInputDevices(&rid, 1, sizeof(rid))) {
+				Launcher::Logf("InputBridge: WM_MOUSEWHEEL + Raw Input on hwnd %p", hwnd);
 			} else {
-				Launcher::Logf("InputBridge: WH_MOUSE_LL hook failed err=%lu", ::GetLastError());
+				Launcher::Logf("InputBridge: window subclass ok, Raw Input failed err=%lu", ::GetLastError());
 			}
 		}
 
@@ -89,17 +142,8 @@ namespace vegascraft
 		*reinterpret_cast<std::uint64_t*>(base + proto::kOffInputRing + 0x00) = head_;
 	}
 
-	void InputBridge::OnRawKey(std::uint16_t sdlScancode, bool down)
-	{
-		(void)sdlScancode;
-		(void)down;
-	}
-
-	void InputBridge::OnMouseButton(std::uint16_t button, bool down)
-	{
-		(void)button;
-		(void)down;
-	}
+	void InputBridge::OnRawKey(std::uint16_t, bool) {}
+	void InputBridge::OnMouseButton(std::uint16_t, bool) {}
 
 	void InputBridge::OnMouseMove(std::int32_t dx, std::int32_t dy)
 	{
@@ -121,14 +165,30 @@ namespace vegascraft
 
 	void InputBridge::Flush(Link& link)
 	{
-		if (!link.IsOpen() || mode_ == Mode::HostMenu || !Controls::MinecraftOwnsPlayer()) {
+		EnsureWindowHook();
+
+		const bool owning = Controls::MinecraftOwnsPlayer();
+		if (!link.IsOpen() || mode_ == Mode::HostMenu || !owning) {
+			if (wasOwning && link.IsOpen()) {
+				Push(link, proto::kInReleaseAll, 0, 0);
+			}
+			wasOwning = false;
 			haveCursor = false;
+			// Forget edges so a re-press after regain is seen as a new down.
+			std::memset(keyDown, 0, sizeof(keyDown));
+			std::memset(mouseDown, 0, sizeof(mouseDown));
 			return;
 		}
-		EnsureMouseHook();
+
+		if (!wasOwning) {
+			wasOwning = true;
+			haveCursor = false;
+			std::memset(keyDown, 0, sizeof(keyDown));
+			std::memset(mouseDown, 0, sizeof(mouseDown));
+			Launcher::Logf("InputBridge: Minecraft owns — forwarding Win32 input");
+		}
 		if (!logged) {
 			logged = true;
-			Launcher::Logf("InputBridge: polling Win32 input → Minecraft (SkyCraft-style)");
 		}
 
 		for (const auto& km : kKeys) {
@@ -172,7 +232,5 @@ namespace vegascraft
 			lastCursor = cur;
 			haveCursor = true;
 		}
-
-		(void)sensitivity;
 	}
 }

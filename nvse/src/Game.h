@@ -50,6 +50,8 @@ namespace vegascraft
 		bool teleportPending_{ true };
 		bool haveLastFnv_{ false };
 		bool haveLastPuppetFnv_{ false };
+		bool mcLinkedSticky_{ false };
+		int ownsMisses_{ 0 };
 		std::uint32_t teleportSeq_{ 0 };
 		float lookYaw_{ 0.f };
 		float lookPitch_{ 0.f };

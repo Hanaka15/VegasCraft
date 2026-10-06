@@ -62,29 +62,32 @@ namespace vegascraft
 			}
 		}
 
-		// MVP floor under the player until real FNV raycasts exist.
-		// Send both exact triangles (smooth feet) and solid voxel blocks (holdUntilReady / vanilla queries).
+		// MVP: large flat pad under the player (real FNV raycasts later — see SkyCraft Collision.cpp).
+		// Reach is ~4.5 blocks; pad radius 24 so looking at nearby Mojave ground can hit for place/break.
+		constexpr float kPad = 24.f;
 		const auto mc = coords::FnvToMc(playerFnvX, playerFnvY, playerFnvZ);
 		const float y = static_cast<float>(mc.y) - 0.01f;
-		const float x0 = static_cast<float>(mc.x) - 8.f;
-		const float x1 = static_cast<float>(mc.x) + 8.f;
-		const float z0 = static_cast<float>(mc.z) - 8.f;
-		const float z1 = static_cast<float>(mc.z) + 8.f;
+		const float x0 = static_cast<float>(mc.x) - kPad;
+		const float x1 = static_cast<float>(mc.x) + kPad;
+		const float z0 = static_cast<float>(mc.z) - kPad;
+		const float z1 = static_cast<float>(mc.z) + kPad;
 
 		const std::int32_t bx = static_cast<std::int32_t>(std::floor(mc.x));
 		const std::int32_t by = static_cast<std::int32_t>(std::floor(mc.y)) - 1;
 		const std::int32_t bz = static_cast<std::int32_t>(std::floor(mc.z));
+		const std::int32_t half = static_cast<std::int32_t>(kPad);
 
 		constexpr std::uint32_t kTriCount = 2;
 		constexpr std::uint32_t kTriPayload = 32 + kTriCount * 40;
 		if (auto* payload = RingWrite(link, ringHead_, proto::kColTris, kTriPayload)) {
 			proto::ColRegion region{};
-			region.minX = bx - 8;
-			region.minY = by - 1;
-			region.minZ = bz - 8;
-			region.maxX = bx + 8;
+			// Span an extra REGION_SIZE below so holdUntilReady's isKnown(by-8) can pass.
+			region.minX = bx - half;
+			region.minY = by - 8;
+			region.minZ = bz - half;
+			region.maxX = bx + half;
 			region.maxY = by + 1;
-			region.maxZ = bz + 8;
+			region.maxZ = bz + half;
 			region.epoch = epoch_;
 			region.count = kTriCount;
 			std::memcpy(payload, &region, sizeof(region));
@@ -99,25 +102,25 @@ namespace vegascraft
 			std::memcpy(payload + 32, tris, sizeof(tris));
 		}
 
-		// 3×3 solid blocks under feet so isKnown / hasSolidBelow release the hold quickly.
-		constexpr std::int32_t kHalf = 1;
-		constexpr std::uint32_t kBlockCount = static_cast<std::uint32_t>((kHalf * 2 + 1) * (kHalf * 2 + 1));
+		// Dense solid strip near feet for vanilla queries / hasSolidBelow; keep payload small.
+		constexpr std::int32_t kSolidHalf = 4;
+		constexpr std::uint32_t kBlockCount = static_cast<std::uint32_t>((kSolidHalf * 2 + 1) * (kSolidHalf * 2 + 1));
 		constexpr std::uint32_t kRegPayload = 32 + kBlockCount * 80;
 		if (auto* payload = RingWrite(link, ringHead_, proto::kColRegion, kRegPayload)) {
 			proto::ColRegion region{};
-			region.minX = bx - kHalf;
-			region.minY = by;
-			region.minZ = bz - kHalf;
-			region.maxX = bx + kHalf;
-			region.maxY = by;
-			region.maxZ = bz + kHalf;
+			region.minX = bx - kSolidHalf;
+			region.minY = by - 8;
+			region.minZ = bz - kSolidHalf;
+			region.maxX = bx + kSolidHalf;
+			region.maxY = by + 1;
+			region.maxZ = bz + kSolidHalf;
 			region.epoch = epoch_;
 			region.count = kBlockCount;
 			std::memcpy(payload, &region, sizeof(region));
 
 			std::uint8_t* dst = payload + 32;
-			for (std::int32_t x = region.minX; x <= region.maxX; ++x) {
-				for (std::int32_t z = region.minZ; z <= region.maxZ; ++z) {
+			for (std::int32_t x = bx - kSolidHalf; x <= bx + kSolidHalf; ++x) {
+				for (std::int32_t z = bz - kSolidHalf; z <= bz + kSolidHalf; ++z) {
 					proto::ColBlock blk{};
 					blk.x = x;
 					blk.y = by;

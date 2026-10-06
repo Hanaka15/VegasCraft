@@ -10,8 +10,10 @@ namespace vegascraft
 {
 	namespace
 	{
-		// FNV units — bigger jumps mean the engine moved the player (load, door, fast travel).
-		constexpr double kFnvTeleportThreshold = 300.0;
+		// Only treat huge jumps as FNV-driven teleports (doors / load / fast travel).
+		// Console SetPos is imprecise under Proton — a low threshold storms teleportSeq and
+		// freezes Minecraft in holdUntilReady forever.
+		constexpr double kFnvTeleportThreshold = 2048.0;
 	}
 
 	Game& Game::Get()
@@ -48,7 +50,7 @@ namespace vegascraft
 		lookInitialized_ = false;
 		teleportPending_ = true;
 		haveLastPuppetFnv_ = false;
-		Controls::SetMinecraftOwnsPlayer(false);  // re-apply after load clears AltEx flags
+		Controls::SetMinecraftOwnsPlayer(false);
 		exporter_.BumpEpoch();
 		context_.OnCellChange(0x000DA726 /* WastelandNV placeholder */, false);
 		Launcher::Logf("OnNewGameOrLoad: teleport pending (epoch=%u)", exporter_.Epoch());
@@ -74,16 +76,6 @@ namespace vegascraft
 			lastFnvY_ = fnvY;
 			lastFnvZ_ = fnvZ;
 			haveLastFnv_ = true;
-			// Engine moved the player far from where we last puppeted → resync MC.
-			if (haveLastPuppetFnv_) {
-				const double dx = fnvX - lastPuppetFnvX_;
-				const double dy = fnvY - lastPuppetFnvY_;
-				const double dz = fnvZ - lastPuppetFnvZ_;
-				if (dx * dx + dy * dy + dz * dz > kFnvTeleportThreshold * kFnvTeleportThreshold) {
-					teleportPending_ = true;
-					Launcher::Logf("FNV moved player (%.0f units); teleport pending", std::sqrt(dx * dx + dy * dy + dz * dz));
-				}
-			}
 		}
 
 		const auto fnvMc = coords::FnvToMc(
@@ -91,20 +83,48 @@ namespace vegascraft
 			haveLastFnv_ ? lastFnvY_ : 0.0,
 			haveLastFnv_ ? lastFnvZ_ : 128.0);
 
+		const bool arriving = haveMc && mcInWorld && mc.teleportAck != teleportSeq_;
+		const bool puppet = inGame_ && mcInWorld && haveMc && mc.teleportAck == teleportSeq_;
+
+		// Detect FNV-driven moves only while we are already puppeting (SkyCraft compares to lastSetPos).
+		if (puppet && haveFnv && haveLastPuppetFnv_) {
+			const double dx = fnvX - lastPuppetFnvX_;
+			const double dy = fnvY - lastPuppetFnvY_;
+			const double dz = fnvZ - lastPuppetFnvZ_;
+			if (dx * dx + dy * dy + dz * dz > kFnvTeleportThreshold * kFnvTeleportThreshold) {
+				teleportPending_ = true;
+				haveLastPuppetFnv_ = false;
+				Launcher::Logf("FNV moved player (%.0f units); teleport pending", std::sqrt(dx * dx + dy * dy + dz * dz));
+			}
+		}
+
 		if (teleportPending_ && inGame_ && haveLastFnv_) {
 			++teleportSeq_;
 			teleportPending_ = false;
 			lookYaw_ = coords::FnvYawToMc(fnvYawDeg);
 			lookPitch_ = coords::FnvPitchToMc(fnvPitchDeg);
 			lookInitialized_ = true;
+			lastPuppetFnvX_ = lastFnvX_;
+			lastPuppetFnvY_ = lastFnvY_;
+			lastPuppetFnvZ_ = lastFnvZ_;
+			haveLastPuppetFnv_ = true;
 			Launcher::Logf(
 				"teleportSeq=%u → MC (%.1f, %.1f, %.1f) from FNV (%.0f, %.0f, %.0f)",
 				teleportSeq_, fnvMc.x, fnvMc.y, fnvMc.z, lastFnvX_, lastFnvY_, lastFnvZ_);
 		}
 
-		const bool arriving = haveMc && mcInWorld && mc.teleportAck != teleportSeq_;
-		const bool puppet = inGame_ && mcInWorld && haveMc && mc.teleportAck == teleportSeq_;
-		Controls::SetMinecraftOwnsPlayer(puppet || arriving);
+		// While MC is in the mirror world, FNV always hands the player to Minecraft (SkyCraft).
+		// Sticky across brief seqlock misses so WASD key edges aren't dropped mid-stride.
+		if (inGame_ && mcInWorld) {
+			mcLinkedSticky_ = true;
+			ownsMisses_ = 0;
+		} else if (haveMc && !mcInWorld) {
+			mcLinkedSticky_ = false;
+		} else if (!haveMc && mcLinkedSticky_ && ++ownsMisses_ > 90) {
+			mcLinkedSticky_ = false;
+		}
+		const bool owns = inGame_ && mcLinkedSticky_;
+		Controls::SetMinecraftOwnsPlayer(owns);
 		puppet_.SetEnabled(puppet);
 
 		if (haveMc) {
@@ -114,25 +134,22 @@ namespace vegascraft
 
 		float dx = 0.f, dy = 0.f;
 		input_.ConsumeLook(dx, dy);
-		if ((puppet || arriving) && !lookInitialized_ && haveLastFnv_) {
+		if (owns && !lookInitialized_ && haveLastFnv_) {
 			lookYaw_ = coords::FnvYawToMc(fnvYawDeg);
 			lookPitch_ = coords::FnvPitchToMc(fnvPitchDeg);
 			lookInitialized_ = true;
 		}
-		if ((puppet || arriving) && !mcScreen) {
+		if (owns && !mcScreen) {
 			const float s = 0.5f * 0.6f + 0.2f;
 			const float factor = s * s * s * 8.0f * 0.15f;
 			lookYaw_ = std::fmod(lookYaw_ + dx * factor, 360.0f);
 			if (lookYaw_ < 0.f) {
 				lookYaw_ += 360.0f;
 			}
-			// Wine/Proton GetCursorPos Y is opposite Raw Input mouseInputY used by SkyCraft.
 			lookPitch_ = std::clamp(lookPitch_ - dy * factor, -90.0f, 90.0f);
 			camera_.UpdateLook(lookYaw_, lookPitch_);
 		}
 
-		// HostState.pos is always the FNV player's feet (SkyCraft). Never echo MC here —
-		// that was teleporting MC to (0,0,0) on first link.
 		proto::HostState host{};
 		host.flags = inGame_ ? proto::kHostInGame : 0;
 		host.worldId = context_.WorldId();
@@ -168,9 +185,10 @@ namespace vegascraft
 			skills_.OnMcSneakTick();
 		}
 
-		// Collision around MC feet while puppeted so the floor follows the walk; else FNV feet.
 		double exportX = lastFnvX_, exportY = lastFnvY_, exportZ = lastFnvZ_;
-		if (puppet && haveMc) {
+		if ((puppet || arriving) && haveMc) {
+			// While MC is arriving/held, centre the floor on its feet (Host teleport target /
+			// current MC pos), not a stale FNV read — otherwise hold never sees ground.
 			const auto feet = coords::McToFnv(mc.x, mc.y, mc.z);
 			exportX = feet.x;
 			exportY = feet.y;

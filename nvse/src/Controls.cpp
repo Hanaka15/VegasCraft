@@ -65,11 +65,17 @@ namespace vegascraft::Controls
 		if (owns) {
 			std::snprintf(buf, sizeof(buf), "DisablePlayerControlsAltEx %d", kFlags);
 			RunLine(buf);
-			Launcher::Logf("Controls: Minecraft owns player (FNV move/weapons/POV off; camera follows puppet)");
+			static int ownLogs = 0;
+			if (ownLogs++ < 3) {
+				Launcher::Logf("Controls: Minecraft owns player (FNV move/weapons/POV off; camera follows puppet)");
+			}
 		} else {
 			std::snprintf(buf, sizeof(buf), "EnablePlayerControlsAltEx %d", kFlags);
 			RunLine(buf);
-			Launcher::Logf("Controls: FNV owns player again");
+			static int freeLogs = 0;
+			if (freeLogs++ < 3) {
+				Launcher::Logf("Controls: FNV owns player again");
+			}
 		}
 		g_applied = true;
 	}

@@ -276,10 +276,12 @@ public final class SkyClient {
 			holdSince = System.currentTimeMillis();
 		}
 		int bx = (int) Math.floor(holdPos.x), by = (int) Math.floor(holdPos.y), bz = (int) Math.floor(holdPos.z);
-		boolean known = SkyCollision.isKnown(bx, by - 1, bz) && SkyCollision.isKnown(bx, by, bz)
-			&& SkyCollision.isKnown(bx, by - SkyCollision.REGION_SIZE, bz);
-		// Release once there is actual ground below (or after a timeout, e.g. when mid-air on purpose).
-		boolean ready = known && (SkyCollision.hasSolidBelow(bx, by, bz, 12) || System.currentTimeMillis() - holdSince > 6000);
+		boolean known = SkyCollision.isKnown(bx, by - 1, bz) && SkyCollision.isKnown(bx, by, bz);
+		boolean grounded = SkyCollision.hasSolidBelow(bx, by, bz, 12);
+		long heldMs = System.currentTimeMillis() - holdSince;
+		// Timeout must work even when isKnown never becomes true (triangle-only / partial MVP floors).
+		// SkyCraft ANDs known with (solid||timeout), which freezes forever if known stays false.
+		boolean ready = (known && grounded) || (grounded && heldMs > 1500) || heldMs > 4000;
 		if (ready && sky.inGame() && !sky.loading()) {
 			// FNV's feet can sit a fraction of a voxel inside our ground layer. Minecraft's
 			// collision never pushes you out of a shape, so you'd drop through: lift out first.
