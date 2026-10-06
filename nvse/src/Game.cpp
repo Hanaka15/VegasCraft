@@ -98,11 +98,8 @@ namespace vegascraft
 		input_.Flush(link_);
 	}
 
-	void Game::OnPresent(void* d3d9Device)
+	void Game::OnPresent(bool isLoadingScreen)
 	{
-		if (!compositor_.Init(d3d9Device)) {
-			return;
-		}
-		compositor_.OnPresent(link_, d3d9Device);
+		compositor_.OnPresent(link_, isLoadingScreen);
 	}
 }

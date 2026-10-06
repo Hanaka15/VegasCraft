@@ -102,7 +102,7 @@ struct NVSEMessagingInterface
 		kMessage_ScriptCompile,
 		kMessage_EventListDestroyed,
 		kMessage_PostQueryPlugins,
-		kMessage_OnFramePresent,
+		kMessage_OnFramePresent, // about to present a frame; data = int* isLoadingScreen (not D3D device)
 		kMessage_ReloadConfig,
 	};
 

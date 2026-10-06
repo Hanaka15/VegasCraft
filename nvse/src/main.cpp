@@ -73,8 +73,13 @@ namespace
 			}
 			break;
 		case NVSEMessagingInterface::kMessage_OnFramePresent:
+			// msg->data is int* loadingScreen (NOT IDirect3DDevice9*). Device comes from NiDX9Renderer.
 			if (g_bridgeReady) {
-				game.OnPresent(msg->data);
+				bool loading = false;
+				if (msg->data && msg->dataLen >= sizeof(int)) {
+					loading = *static_cast<int*>(msg->data) != 0;
+				}
+				game.OnPresent(loading);
 			}
 			break;
 		case NVSEMessagingInterface::kMessage_ExitGame:
@@ -93,7 +98,7 @@ extern "C" __declspec(dllexport) bool NVSEPlugin_Query(const NVSEInterface* nvse
 {
 	info->infoVersion = PluginInfo::kInfoVersion;
 	info->name = "VegasCraft";
-	info->version = 4;
+	info->version = 5;
 
 	if (nvse->isEditor) {
 		return false;

@@ -24,7 +24,7 @@ namespace vegascraft
 		bool Init();
 		void Shutdown();
 		void OnFrame();
-		void OnPresent(void* d3d9Device);
+		void OnPresent(bool isLoadingScreen);
 		void OnNewGameOrLoad();
 
 		Link& GetLink() { return link_; }

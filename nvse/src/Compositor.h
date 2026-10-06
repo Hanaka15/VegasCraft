@@ -5,21 +5,23 @@
 
 namespace vegascraft
 {
-	// Consumes Minecraft overlay slots. GPU blit is currently disabled under Proton
-	// (DrawPrimitiveUP during OnFramePresent hard-crashed Fallout).
+	// Blit Minecraft overlay onto the D3D9 backbuffer just before Present.
 	class Compositor
 	{
 	public:
-		bool Init(void* d3d9Device);
 		void Shutdown();
-		void OnPresent(Link& link, void* d3d9Device);
+		void OnPresent(Link& link, bool isLoadingScreen);
 
 	private:
-		void* device_{ nullptr };
-		void* staging_{ nullptr };
+		bool EnsureTexture(void* device, std::uint32_t w, std::uint32_t h);
+		bool BlitOnce(Link& link, void* device);
+
+		void* staging_{ nullptr };  // IDirect3DTexture9*
 		std::uint32_t texW_{ 0 };
 		std::uint32_t texH_{ 0 };
 		std::uint32_t frontSlot_{ 2 };
-		bool loggedBlit_{ false };
+		bool loggedOk_{ false };
+		bool loggedFail_{ false };
+		bool disabled_{ false };
 	};
 }
