@@ -1,6 +1,7 @@
 #include "Game.h"
 
 #include "nvse/PluginAPI.h"
+#include "Focus.h"
 
 #include <cstring>
 
@@ -61,13 +62,16 @@ namespace
 		case NVSEMessagingInterface::kMessage_PostPostLoad:
 		case NVSEMessagingInterface::kMessage_DeferredInit:
 			EnsureBridge(msg->type == NVSEMessagingInterface::kMessage_DeferredInit ? "DeferredInit" : "PostLoad");
+			vegascraft::Focus::Kick(240);
 			break;
 		case NVSEMessagingInterface::kMessage_NewGame:
 		case NVSEMessagingInterface::kMessage_PostLoadGame:
 			EnsureBridge("NewGameOrLoad");
+			vegascraft::Focus::Kick(120);
 			game.OnNewGameOrLoad();
 			break;
 		case NVSEMessagingInterface::kMessage_MainGameLoop:
+			vegascraft::Focus::Tick();
 			if (g_bridgeReady) {
 				game.OnFrame();
 			}

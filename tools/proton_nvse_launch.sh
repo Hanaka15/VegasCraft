@@ -78,9 +78,8 @@ if [[ -f "$PLUGIN_INI" ]]; then
 	log "Set bStartWithHost=0 (Prism started by VegasCraft_boot.cmd)"
 fi
 
-# Exclusive fullscreen for low input latency. Start Prism minimized and Fallout
-# last (see VegasCraft_boot.cmd) so FNV reclaims the display. Also force
-# iPresentInterval=0 — vsync in windowed/borderless feels like huge input lag.
+# Exclusive fullscreen only (user-rejected borderless due to input lag).
+# iPresentInterval=0 kills vsync lag if anything forces windowed.
 force_display_prefs() {
 	local docs="$COMPAT/pfx/drive_c/users/steamuser/Documents/My Games/FalloutNV"
 	local f
@@ -89,16 +88,34 @@ force_display_prefs() {
 		sed -i \
 			-e 's/^bFull Screen=.*/bFull Screen=1/' \
 			-e 's/^iPresentInterval=.*/iPresentInterval=0/' \
-			-e 's/^iLocation X=.*/iLocation X=0/' \
-			-e 's/^iLocation Y=.*/iLocation Y=0/' \
 			"$f" || true
-		if rg -q '^iSize W=' "$f"; then
-			sed -i -e 's/^iSize W=.*/iSize W=1920/' -e 's/^iSize H=.*/iSize H=1080/' "$f" || true
-		fi
-		log "Fullscreen + no-vsync prefs: $f"
+		log "Exclusive fullscreen prefs: $f"
 	done
 }
 force_display_prefs
+
+# Wayland/X11: keep raising the Fallout window so exclusive FS is not lost behind Prism.
+start_fnv_focus_helper() {
+	local helper_log="${XDG_RUNTIME_DIR:-/tmp}/vegascraft-focus.log"
+	: >"$helper_log"
+	(
+		for _ in $(seq 1 60); do
+			sleep 1
+			if command -v xdotool >/dev/null 2>&1; then
+				xdotool search --name 'Fallout' windowactivate windowraise 2>>"$helper_log" || true
+				xdotool search --name 'New Vegas' windowactivate windowraise 2>>"$helper_log" || true
+				xdotool search --class 'falloutnv.exe' windowactivate windowraise 2>>"$helper_log" || true
+			fi
+			if command -v kdotool >/dev/null 2>&1; then
+				kdotool search --name 'Fallout' windowactivate 2>>"$helper_log" || true
+			fi
+		done
+	) &
+	FOCUS_PID=$!
+	log "FNV focus helper pid=$FOCUS_PID"
+}
+FOCUS_PID=0
+start_fnv_focus_helper
 
 export WINEDLLOVERRIDES="${WINEDLLOVERRIDES:+$WINEDLLOVERRIDES;}dinput8.dll=n,b;nvse_steam_loader.dll=n,b;nvse_1_4.dll=n,b"
 export STEAM_COMPAT_DATA_PATH="${STEAM_COMPAT_DATA_PATH:-$COMPAT}"

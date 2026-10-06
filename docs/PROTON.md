@@ -43,10 +43,9 @@ you can — other code paths may still call `NetworkInterface`.
 
 ## Display
 
-Use **exclusive fullscreen** (`bFull Screen=1`) for acceptable input lag. The launch
-script also sets `iPresentInterval=0` (no vsync) — windowed/borderless with vsync
-on Proton feels like severe input delay.
+**Exclusive fullscreen only** (`bFull Screen=1`) — borderless/windowed is not used
+(input lag). `iPresentInterval=0` disables vsync.
 
-`VegasCraft_boot.cmd` starts Prism **minimized**, then Fallout with `/wait`, so FNV
-can take exclusive fullscreen after the launcher. Minecraft itself stays hidden
-(`-Dvegascraft.startHidden=true`).
+Boot starts Prism/MC first (minimized/hidden), waits for `javaw`, then starts Fallout
+so exclusive mode is taken last. A focus helper (plugin + `xdotool`) raises the FNV
+window without `SW_RESTORE` so fullscreen is not dropped to windowed.

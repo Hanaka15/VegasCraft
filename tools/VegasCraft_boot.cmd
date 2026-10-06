@@ -2,19 +2,33 @@
 setlocal EnableExtensions
 cd /d "%~dp0"
 
-rem One Proton/wineserver session.
-rem Start Prism minimized (MC window is already hidden by the mod), then Fallout
-rem with /wait so exclusive fullscreen can take the display last (low input lag).
-rem Do not use a second Linux "proton run" - that blocks on wineserver -w.
+rem Exclusive fullscreen: start Prism/MC first (hidden), wait for javaw, THEN Fallout
+rem so FNV takes exclusive mode last. No borderless.
+rem Labels must stay outside IF blocks (Wine cmd).
 
 set "PRISM=%LOCALAPPDATA%\VegasCraft\Prism\prismlauncher.exe"
-if exist "%PRISM%" (
-	echo VegasCraft_boot: starting Prism minimized
-	start "" /min "%PRISM%" --launch VegasCraft
-) else (
-	echo VegasCraft_boot: Prism missing at %PRISM%
-)
+if not exist "%PRISM%" goto no_prism
 
+echo VegasCraft_boot: starting Prism minimized
+start "" /min "%PRISM%" --launch VegasCraft
+
+set TRIES=0
+:wait_javaw
+ping -n 2 127.0.0.1 >nul
+set /a TRIES+=1
+tasklist /FI "IMAGENAME eq javaw.exe" 2>NUL | find /I "javaw.exe" >NUL
+if not errorlevel 1 goto javaw_ready
+if %TRIES% GEQ 40 goto javaw_ready
+goto wait_javaw
+
+:javaw_ready
+echo VegasCraft_boot: Minecraft JVM up - starting FalloutNV exclusive
+goto start_fnv
+
+:no_prism
+echo VegasCraft_boot: Prism missing at %PRISM%
+
+:start_fnv
 echo VegasCraft_boot: starting FalloutNV.exe
 start "" /wait "FalloutNV.exe"
 set RC=%ERRORLEVEL%
