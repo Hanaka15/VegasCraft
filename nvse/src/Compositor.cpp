@@ -7,9 +7,11 @@ namespace vegascraft
 {
 	namespace
 	{
-		// FalloutNV 1.4.0.525 — NiDX9Renderer singleton + IDirect3DDevice9* field.
-		constexpr std::uintptr_t kNiDX9RendererSingleton = 0x11C73B4;
-		constexpr std::uintptr_t kDeviceOffset = 0x280;
+		// FalloutNV 1.4.0.525 — JIP LN NVSE netimmerse.h:
+		//   NiDX9Renderer** singleton @ 0x11F4748
+		//   IDirect3DDevice9* device @ +0x288
+		constexpr std::uintptr_t kNiDX9RendererSingleton = 0x11F4748;
+		constexpr std::uintptr_t kDeviceOffset = 0x288;
 
 		struct OverlayVertex
 		{
@@ -30,11 +32,21 @@ namespace vegascraft
 				if (!devicePtr || !*devicePtr) {
 					return nullptr;
 				}
-				const auto* vtable = *reinterpret_cast<const void* const*>(*devicePtr);
+				IDirect3DDevice9* device = *devicePtr;
+				const auto* vtable = *reinterpret_cast<const void* const*>(device);
 				if (!vtable || reinterpret_cast<std::uintptr_t>(vtable) < 0x10000) {
 					return nullptr;
 				}
-				return *devicePtr;
+				// Reject garbage pointers (wrong offset caused C0000096 privileged insn).
+				D3DCAPS9 caps{};
+				if (FAILED(device->GetDeviceCaps(&caps))) {
+					return nullptr;
+				}
+				if (caps.DeviceType != D3DDEVTYPE_HAL && caps.DeviceType != D3DDEVTYPE_REF &&
+					caps.DeviceType != D3DDEVTYPE_SW) {
+					return nullptr;
+				}
+				return device;
 			} __except (EXCEPTION_EXECUTE_HANDLER) {
 				return nullptr;
 			}
@@ -254,6 +266,11 @@ namespace vegascraft
 
 		IDirect3DDevice9* device = GetGameDevice();
 		if (!device) {
+			static bool loggedNoDev = false;
+			if (!loggedNoDev) {
+				loggedNoDev = true;
+				Launcher::Logf("Compositor: no valid D3D9 device yet (singleton 0x%X +0x%X)", 0x11F4748, 0x288);
+			}
 			return;
 		}
 
