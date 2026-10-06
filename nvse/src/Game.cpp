@@ -64,19 +64,16 @@ namespace vegascraft
 			host.posY = mcPos.y;
 			host.posZ = mcPos.z;
 		}
-		// Match the real game window / fullscreen resolution for overlay sizing.
-		RECT rc{};
-		HWND hwnd = ::GetActiveWindow();
-		if (!hwnd) {
-			hwnd = ::GetForegroundWindow();
+		// Never use GetActiveWindow — under Proton it can be a tiny non-game HWND (e.g. 160x31)
+		// and Minecraft then resizes its framebuffer every frame until something dies.
+		std::uint32_t vw = static_cast<std::uint32_t>(::GetSystemMetrics(SM_CXSCREEN));
+		std::uint32_t vh = static_cast<std::uint32_t>(::GetSystemMetrics(SM_CYSCREEN));
+		if (vw < 640 || vh < 480) {
+			vw = 1920;
+			vh = 1080;
 		}
-		if (hwnd && ::GetClientRect(hwnd, &rc) && rc.right > 0 && rc.bottom > 0) {
-			host.viewportW = static_cast<std::uint32_t>(rc.right);
-			host.viewportH = static_cast<std::uint32_t>(rc.bottom);
-		} else {
-			host.viewportW = static_cast<std::uint32_t>(::GetSystemMetrics(SM_CXSCREEN));
-			host.viewportH = static_cast<std::uint32_t>(::GetSystemMetrics(SM_CYSCREEN));
-		}
+		host.viewportW = vw;
+		host.viewportH = vh;
 		host.gameHour = 12.0f;
 		link_.WriteHostState(host);
 
