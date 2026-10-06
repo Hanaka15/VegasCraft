@@ -10,6 +10,7 @@ namespace vegascraft::Controls
 	void SetConsole(void* consoleInterface);
 	void SetMinecraftOwnsPlayer(bool owns);
 	bool MinecraftOwnsPlayer();
+	void RunScript(const char* line);
 
 	// Write FNV first-person look from Minecraft yaw/pitch (degrees, MC convention).
 	void ApplyLook(float mcYawDeg, float mcPitchDeg);
