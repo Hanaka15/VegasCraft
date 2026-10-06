@@ -18,6 +18,10 @@ namespace vegascraft
 		if (!enabled_) {
 			return;
 		}
-		Controls::ApplyLook(mcYawDeg, mcPitchDeg);
+		// Throttle SetAngle — look is also applied via HostState to MC; FNV only needs occasional sync.
+		static int n = 0;
+		if ((n++ % 2) == 0) {
+			Controls::ApplyLook(mcYawDeg, mcPitchDeg);
+		}
 	}
 }
