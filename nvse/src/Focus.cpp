@@ -59,8 +59,8 @@ namespace vegascraft::Focus
 			return;
 		}
 
-		// Do not SW_RESTORE — that can dump exclusive fullscreen into windowed.
-		::ShowWindow(hwnd, SW_SHOW);
+		// Windowed: restore if minimized so the game is actually visible.
+		::ShowWindow(hwnd, SW_RESTORE);
 		::BringWindowToTop(hwnd);
 
 		HWND fg = ::GetForegroundWindow();
