@@ -2,6 +2,7 @@
 
 #include "nvse/PluginAPI.h"
 #include "Focus.h"
+#include "Controls.h"
 
 #include <cstring>
 
@@ -128,6 +129,10 @@ extern "C" __declspec(dllexport) bool NVSEPlugin_Load(const NVSEInterface* nvse)
 		g_messaging->RegisterListener(g_pluginHandle, "NVSE", MessageHandler);
 	} else {
 		EnsureBridge("Load-no-messaging");
+	}
+
+	if (void* console = nvse->QueryInterface(kInterface_Console)) {
+		vegascraft::Controls::SetConsole(console);
 	}
 
 	return true;

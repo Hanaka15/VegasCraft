@@ -46,6 +46,9 @@ namespace vegascraft
 		Skills skills_;
 
 		bool inGame_{ false };
+		bool lookInitialized_{ false };
+		float lookYaw_{ 0.f };
+		float lookPitch_{ 0.f };
 		double debugFnvX_{ 0 }, debugFnvY_{ 0 }, debugFnvZ_{ 128 };
 	};
 }

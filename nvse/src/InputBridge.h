@@ -5,7 +5,7 @@
 
 namespace vegascraft
 {
-	// Phase 1: swallow most FNV input, forward to MC input ring; allow-list Activate/Esc/Pip-Boy/Map.
+	// SkyCraft-style: swallow FNV gameplay input, forward to MC; host owns look integration.
 	class InputBridge
 	{
 	public:
@@ -25,10 +25,12 @@ namespace vegascraft
 		void OnScroll(std::int32_t notches120);
 		void Flush(Link& link);
 		bool ShouldSwallow(std::uint16_t sdlScancode) const;
+		void ConsumeLook(float& dx, float& dy);
 
 	private:
 		Mode mode_{ Mode::Gameplay };
 		std::uint64_t head_{ 0 };
+		std::int32_t pendingScroll_{ 0 };
 
 		void Push(Link& link, std::uint16_t type, std::uint16_t code, std::int32_t a, std::int32_t b = 0, std::int32_t c = 0);
 	};

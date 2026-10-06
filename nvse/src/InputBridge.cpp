@@ -1,13 +1,42 @@
 #include "InputBridge.h"
+#include "Controls.h"
+#include "Launcher.h"
+
+#include <cmath>
 
 namespace vegascraft
 {
 	namespace
 	{
-		bool IsAllowListed(std::uint16_t code)
+		// DirectInput/Windows VK → SDL scancode (USB HID), matching SkyCraft's map for keys we care about.
+		struct KeyMap
 		{
-			// SDL scancodes: ESC, TAB (Pip-Boy), M (map). Activate remapped separately.
-			return code == 41 || code == 43 || code == 16;
+			int vk;
+			std::uint16_t sdl;
+		};
+
+		constexpr KeyMap kKeys[] = {
+			{ 'W', 26 }, { 'A', 4 }, { 'S', 22 }, { 'D', 7 }, { ' ', 44 }, { VK_SHIFT, 225 }, { VK_CONTROL, 224 },
+			{ VK_MENU, 226 }, { 'E', 8 }, { 'Q', 20 }, { 'R', 21 }, { 'F', 9 }, { 'C', 6 }, { 'X', 27 }, { 'Z', 29 },
+			{ '1', 30 }, { '2', 31 }, { '3', 32 }, { '4', 33 }, { '5', 34 }, { '6', 35 }, { '7', 36 }, { '8', 37 },
+			{ '9', 38 }, { '0', 39 }, { VK_TAB, 43 }, { 'T', 23 }, { VK_OEM_2, 56 }, { 'O', 18 }, { 'G', 10 },
+			{ 'H', 11 }, { 'J', 13 }, { 'M', 16 }, { VK_F5, 62 }, { VK_ESCAPE, 41 }, { VK_OEM_3, 53 },
+			{ VK_LEFT, 80 }, { VK_RIGHT, 79 }, { VK_UP, 82 }, { VK_DOWN, 81 },
+		};
+
+		bool keyDown[256]{};
+		bool mouseDown[5]{};
+		POINT lastCursor{};
+		bool haveCursor = false;
+		float lookDx = 0.f;
+		float lookDy = 0.f;
+		float sensitivity = 0.5f;
+		bool logged = false;
+
+		bool IsAllowListedVk(int vk)
+		{
+			// Esc (FNV menu), tilde (console), M (map), J (journal), G (activate) — same idea as SkyCraft.
+			return vk == VK_ESCAPE || vk == VK_OEM_3 || vk == 'M' || vk == 'J' || vk == 'G';
 		}
 	}
 
@@ -16,7 +45,7 @@ namespace vegascraft
 		if (mode_ == Mode::HostMenu) {
 			return false;
 		}
-		return !IsAllowListed(sdlScancode);
+		return sdlScancode != 41 && sdlScancode != 53 && sdlScancode != 16 && sdlScancode != 13 && sdlScancode != 10;
 	}
 
 	void InputBridge::Push(Link& link, std::uint16_t type, std::uint16_t code, std::int32_t a, std::int32_t b, std::int32_t c)
@@ -50,18 +79,86 @@ namespace vegascraft
 
 	void InputBridge::OnMouseMove(std::int32_t dx, std::int32_t dy)
 	{
-		(void)dx;
-		(void)dy;
+		lookDx += static_cast<float>(dx);
+		lookDy += static_cast<float>(dy);
 	}
 
 	void InputBridge::OnScroll(std::int32_t notches120)
 	{
-		(void)notches120;
+		pendingScroll_ += notches120;
+	}
+
+	void InputBridge::ConsumeLook(float& dx, float& dy)
+	{
+		dx = lookDx;
+		dy = lookDy;
+		lookDx = lookDy = 0.f;
 	}
 
 	void InputBridge::Flush(Link& link)
 	{
-		(void)link;
-		// Game.cpp hooks call On* then Flush each frame once OS input is wired.
+		if (!link.IsOpen() || mode_ == Mode::HostMenu || !Controls::MinecraftOwnsPlayer()) {
+			haveCursor = false;
+			return;
+		}
+		if (!logged) {
+			logged = true;
+			Launcher::Logf("InputBridge: polling Win32 input → Minecraft (SkyCraft-style)");
+		}
+
+		// Keyboard edges → MC. Allow-listed keys are still forwarded (MC may use O for pause);
+		// FNV keeps Esc/console/map via DisablePlayerControls not covering them fully — Esc still works.
+		for (const auto& km : kKeys) {
+			const bool down = (::GetAsyncKeyState(km.vk) & 0x8000) != 0;
+			const int idx = km.vk & 0xFF;
+			if (down == keyDown[idx]) {
+				continue;
+			}
+			keyDown[idx] = down;
+			if (mode_ != Mode::McScreen && IsAllowListedVk(km.vk) && km.vk != 'O') {
+				// Leave Esc/~/M/J/G for FNV; still don't send G to MC as place.
+				continue;
+			}
+			Push(link, proto::kInKey, km.sdl, down ? 1 : 0);
+		}
+
+		// Mouse buttons: 1 L, 3 R, 2 M (SDL)
+		static const int vks[] = { VK_LBUTTON, VK_RBUTTON, VK_MBUTTON, VK_XBUTTON1, VK_XBUTTON2 };
+		static const std::uint16_t sdlBtn[] = { 1, 3, 2, 4, 5 };
+		for (int i = 0; i < 5; ++i) {
+			const bool down = (::GetAsyncKeyState(vks[i]) & 0x8000) != 0;
+			if (down == mouseDown[i]) {
+				continue;
+			}
+			mouseDown[i] = down;
+			Push(link, proto::kInMouseButton, sdlBtn[i], down ? 1 : 0);
+		}
+
+		if (pendingScroll_ != 0) {
+			Push(link, proto::kInScroll, 0, pendingScroll_);
+			pendingScroll_ = 0;
+		}
+
+		POINT cur{};
+		if (::GetCursorPos(&cur)) {
+			if (haveCursor && mode_ != Mode::McScreen) {
+				lookDx += static_cast<float>(cur.x - lastCursor.x);
+				lookDy += static_cast<float>(cur.y - lastCursor.y);
+			} else if (haveCursor && mode_ == Mode::McScreen) {
+				Push(link, proto::kInCursor, 0, cur.x, cur.y);
+			}
+			lastCursor = cur;
+			haveCursor = true;
+		}
+
+		// Mouse wheel: Raw Input if available; also eat via GetMessage peek for WM_MOUSEWHEEL on our HWND.
+		MSG msg{};
+		HWND fg = ::GetForegroundWindow();
+		while (fg && ::PeekMessageW(&msg, fg, WM_MOUSEWHEEL, WM_MOUSEWHEEL, PM_REMOVE)) {
+			const int delta = GET_WHEEL_DELTA_WPARAM(msg.wParam);
+			Push(link, proto::kInScroll, 0, delta);
+		}
+
+		(void)sensitivity;
 	}
 }
