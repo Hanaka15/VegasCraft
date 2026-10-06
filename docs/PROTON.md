@@ -24,13 +24,18 @@ FNV can coexist.
 
 ## Java / Wine
 
-Minecraft 26’s Windows Java 25 calls `NetworkInterface.getAll()` while seeding
-`SecureRandom`. That crashes the JVM on **Wine &lt; 9.3** (including **Proton 9.0**,
-which ships Wine 9.0) with `Internal Error (0xc06d007f)` in `kernelbase.dll`.
+Minecraft 26’s Windows Java 25 crashes the JVM on **Wine &lt; 9.3** (including
+**Proton 9.0** / Wine 9.0) with `Internal Error (0xc06d007f)` in `kernelbase.dll`
+when anything calls `NetworkInterface.getAll()` (missing `iphlpapi` entry point).
 The affinity warnings are harmless.
 
-VegasCraft’s instance sets `-Djava.security.properties=java.security.proton` so
-MSCAPI `Windows-PRNG` is used instead (avoids that call at Mixin init).
+VegasCraft applies two workarounds:
+
+1. `-Djava.security.properties=java.security.proton` — MSCAPI `Windows-PRNG`
+   so early `SecureRandom` / UUID seeding does not touch NICs.
+2. `-Dio.netty.machineId=02:00:00:00:00:01 -Dio.netty.processId=1` (also set
+   from the Fabric mod) — Netty skips NIC enumeration when the integrated
+   server opens its memory channel (mirror-world load).
 
 Still prefer **GE-Proton 10+** or **Proton Experimental** (Wine ≥ 9.3) for FNV when
-you can — later networking code may touch `NetworkInterface` for real.
+you can — other code paths may still call `NetworkInterface`.

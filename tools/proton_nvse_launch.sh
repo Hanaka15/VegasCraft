@@ -97,29 +97,41 @@ patch_java_security_workaround() {
 	fi
 	cfg="$inst/instance.cfg"
 	[[ -f "$cfg" ]] || return 0
-	if rg -q 'java\.security\.properties=java\.security\.proton' "$cfg"; then
-		return 0
-	fi
 	python3 - "$cfg" <<'PY'
 import pathlib, re, sys
 p = pathlib.Path(sys.argv[1])
 t = p.read_text()
+need = [
+    "-Djava.security.properties=java.security.proton",
+    "-Dio.netty.machineId=02:00:00:00:00:01",
+    "-Dio.netty.processId=1",
+]
 def inject(m):
-    args = m.group(1)
-    if "java.security.properties" in args:
+    args = m.group(1).strip().strip('"')
+    changed = False
+    for prop in need:
+        key = prop.split("=", 1)[0]
+        if key not in args:
+            if "--enable-native-access=ALL-UNNAMED" in args:
+                args = args.replace(
+                    "--enable-native-access=ALL-UNNAMED",
+                    f"--enable-native-access=ALL-UNNAMED {prop}",
+                    1,
+                )
+            else:
+                args = f"{prop} {args}"
+            changed = True
+    if not changed:
         return m.group(0)
-    needle = "--enable-native-access=ALL-UNNAMED"
-    prop = "-Djava.security.properties=java.security.proton"
-    if needle in args:
-        args = args.replace(needle, f"{needle} {prop}", 1)
-    else:
-        args = f"{prop} {args}"
     return f'JvmArgs="{args}"'
 t2, n = re.subn(r'^JvmArgs="?(.*?)"?\s*$', inject, t, count=1, flags=re.M)
-if n == 1:
+if n == 1 and t2 != t:
     p.write_text(t2)
+    print("patched")
 PY
-	log "Patched instance.cfg for Proton Java SecureRandom workaround"
+	if [[ $? -eq 0 ]]; then
+		log "Ensured Proton Java/Netty NetworkInterface workarounds in instance.cfg"
+	fi
 }
 
 ensure_prism_unpacked() {

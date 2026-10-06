@@ -9,6 +9,7 @@ import net.minecraft.client.renderer.entity.NoopRenderer;
 public final class VegasCraftClient implements ClientModInitializer {
 	@Override
 	public void onInitializeClient() {
+		dev.vegascraft.ProtonWorkarounds.apply();
 		dev.vegascraft.link.VegasLink.announceRunning();
 		DiscordPresence.start();
 		DestructionToggle.register();

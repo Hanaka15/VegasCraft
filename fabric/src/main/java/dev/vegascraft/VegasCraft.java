@@ -21,6 +21,7 @@ public final class VegasCraft implements ModInitializer {
 
 	@Override
 	public void onInitialize() {
+		ProtonWorkarounds.apply();
 		SkyCombat.init();
 		dev.vegascraft.net.SkyNet.init();
 		dev.vegascraft.world.SkyDig.init();
