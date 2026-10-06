@@ -94,25 +94,34 @@ force_display_prefs() {
 }
 force_display_prefs
 
-# Wayland/X11: keep raising the Fallout window so exclusive FS is not lost behind Prism.
+# Wayland: exclusive D3D9 FS is a 1x1 HWND. Boot uses a Wine virtual desktop
+# ("VegasCraft"); raise that desktop, hide Minecraft, clear Steam LD_PRELOAD.
 start_fnv_focus_helper() {
 	local helper_log="${XDG_RUNTIME_DIR:-/tmp}/vegascraft-focus.log"
 	: >"$helper_log"
 	(
-		for _ in $(seq 1 60); do
+		# Steam's 32-bit overlay preload breaks host xdotool.
+		unset LD_PRELOAD
+		export LD_PRELOAD=""
+		for _ in $(seq 1 90); do
 			sleep 1
 			if command -v xdotool >/dev/null 2>&1; then
-				xdotool search --name 'Fallout' windowactivate windowraise 2>>"$helper_log" || true
-				xdotool search --name 'New Vegas' windowactivate windowraise 2>>"$helper_log" || true
-				xdotool search --class 'falloutnv.exe' windowactivate windowraise 2>>"$helper_log" || true
-			fi
-			if command -v kdotool >/dev/null 2>&1; then
-				kdotool search --name 'Fallout' windowactivate 2>>"$helper_log" || true
+				# Keep MC from covering the Wine desktop / FNV surface.
+				xdotool search --name 'Minecraft' windowunmap 2>>"$helper_log" || true
+				xdotool search --name 'Prism Launcher' windowunmap 2>>"$helper_log" || true
+				# Virtual desktop title matches explorer /desktop=VegasCraft,...
+				for wid in $(xdotool search --name 'VegasCraft' 2>/dev/null); do
+					xdotool windowmap "$wid" windowactivate "$wid" windowraise "$wid" \
+						windowsize "$wid" 1920 1080 2>>"$helper_log" || true
+				done
+				for wid in $(xdotool search --name '^Fallout: New Vegas$' 2>/dev/null); do
+					xdotool windowactivate "$wid" windowraise "$wid" 2>>"$helper_log" || true
+				done
 			fi
 		done
 	) &
 	FOCUS_PID=$!
-	log "FNV focus helper pid=$FOCUS_PID"
+	log "FNV focus helper pid=$FOCUS_PID (virtual desktop + hide MC)"
 }
 FOCUS_PID=0
 start_fnv_focus_helper
@@ -202,7 +211,11 @@ stop_vegas_minecraft() {
 	pkill -f 'VegasCraft.*javaw\.exe' 2>/dev/null || true
 }
 
-trap 'stop_vegas_minecraft' EXIT INT TERM
+cleanup_on_exit() {
+	kill "${FOCUS_PID:-0}" 2>/dev/null || true
+	stop_vegas_minecraft
+}
+trap 'cleanup_on_exit' EXIT INT TERM
 
 ensure_prism_unpacked || true
 

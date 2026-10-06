@@ -43,9 +43,12 @@ you can — other code paths may still call `NetworkInterface`.
 
 ## Display
 
-**Exclusive fullscreen only** (`bFull Screen=1`) — borderless/windowed is not used
-(input lag). `iPresentInterval=0` disables vsync.
+**Exclusive fullscreen only** (`bFull Screen=1`) — borderless is not used. `iPresentInterval=0`.
 
-Boot starts Prism/MC first (minimized/hidden), waits for `javaw`, then starts Fallout
-so exclusive mode is taken last. A focus helper (plugin + `xdotool`) raises the FNV
-window without `SW_RESTORE` so fullscreen is not dropped to windowed.
+On KDE Wayland, true D3D9 exclusive mode becomes a **1×1 unmapped HWND** (audio/input
+work, no picture). Boot runs Fallout inside a Wine virtual desktop
+(`explorer /desktop=VegasCraft,1920x1080`) so exclusive FS has a visible surface —
+still exclusive inside Wine, not borderless.
+
+Boot order: **Fallout first**, then Prism/MC (MC window stays hidden; host helper
+unmaps any Minecraft window that appears).

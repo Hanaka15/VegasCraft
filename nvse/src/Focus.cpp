@@ -83,7 +83,10 @@ namespace vegascraft::Focus
 			g_logged = true;
 			RECT rc{};
 			::GetClientRect(hwnd, &rc);
-			Launcher::Logf("Focus: raised Fallout HWND client=%dx%d (exclusive FS kept)", rc.right, rc.bottom);
+			Launcher::Logf("Focus: raised Fallout HWND client=%dx%d", rc.right, rc.bottom);
+			if (rc.right < 640 || rc.bottom < 480) {
+				Launcher::Logf("Focus: WARNING tiny client — exclusive FS needs Wine virtual desktop (VegasCraft_boot)");
+			}
 		}
 	}
 }

@@ -70,12 +70,14 @@ public final class SkyClient {
 	public static void beginFrame() {
 		VegasLink.poll();
 		quitWithFNV(Minecraft.getInstance());
-		if (START_HIDDEN && !startedHidden) {
-			startedHidden = true;
+		if (START_HIDDEN) {
 			Minecraft minecraft = Minecraft.getInstance();
 			hideWindowOnce(minecraft);
-			minecraft.options.getSoundSourceOptionInstance(net.minecraft.sounds.SoundSource.MUSIC).set(0.0);
-			minecraft.getMusicManager().stopPlaying();
+			if (!startedHidden) {
+				startedHidden = true;
+				minecraft.options.getSoundSourceOptionInstance(net.minecraft.sounds.SoundSource.MUSIC).set(0.0);
+				minecraft.getMusicManager().stopPlaying();
+			}
 		}
 		boolean nowLinked = VegasLink.active();
 		if (nowLinked) {
@@ -442,15 +444,21 @@ public final class SkyClient {
 	}
 
 	private static void hideWindowOnce(Minecraft minecraft) {
-		if (windowHidden || SHOW_WINDOW) {
+		if (SHOW_WINDOW) {
 			return;
 		}
-		windowHidden = true;
-		SDLVideo.SDL_HideWindow(minecraft.getWindow().handle());
-		VegasCraft.LOG.info("VegasCraft: game window hidden (run with -Dvegascraft.showWindow=true to keep it)");
+		long handle = minecraft.getWindow().handle();
+		SDLVideo.SDL_HideWindow(handle);
+		// Proton/Wine often ignores a one-shot hide; keep suppressing every frame.
+		if (!windowHidden) {
+			windowHidden = true;
+			VegasCraft.LOG.info("VegasCraft: game window hidden (run with -Dvegascraft.showWindow=true to keep it)");
+		}
 	}
 
 	private static void applyViewportSize(Minecraft minecraft) {
+		// Resizing via setWindowed re-shows the SDL window under Proton and steals
+		// exclusive fullscreen from FNV. Keep an offscreen FBO size only.
 		int w = Math.min(sky.viewportW, Proto.MAX_OVERLAY_W);
 		int h = Math.min(sky.viewportH, Proto.MAX_OVERLAY_H);
 		if (w <= 0 || h <= 0 || (w == appliedViewportW && h == appliedViewportH)) {
@@ -458,7 +466,9 @@ public final class SkyClient {
 		}
 		appliedViewportW = w;
 		appliedViewportH = h;
-		minecraft.getWindow().setWindowed(w, h);
-		VegasCraft.LOG.info("VegasCraft: sizing overlay to FNV viewport {}x{}", w, h);
+		if (SHOW_WINDOW) {
+			minecraft.getWindow().setWindowed(w, h);
+		}
+		VegasCraft.LOG.info("VegasCraft: overlay viewport {}x{} (window kept hidden={})", w, h, !SHOW_WINDOW);
 	}
 }
