@@ -140,6 +140,17 @@ public final class SkyCollision {
 				}
 			}
 		}
+		// Triangle-only exporters (MVP floor) never fill SHAPES — still count as ground.
+		if (!TRIS.isEmpty()) {
+			java.util.ArrayList<SkyTri> tris = new java.util.ArrayList<>();
+			trianglesNear(new net.minecraft.world.phys.AABB(x - 1, y - depth, z - 1, x + 2, y + 1, z + 2), tris);
+			if (!tris.isEmpty()) {
+				double ground = TriCollider.groundAt(tris, x + 0.5, y, z + 0.5, 0.5);
+				if (!Double.isNaN(ground)) {
+					return true;
+				}
+			}
+		}
 		return false;
 	}
 
@@ -375,6 +386,18 @@ public final class SkyCollision {
 		Long before = TRI_HASH.put(region, hash);
 		if (before == null || before != hash) {
 			CHANGED.add(BlockPos.asLong(minX, minY, minZ));
+		}
+		// ColTris must mark regions known — holdUntilReady waits on isKnown, which only
+		// ColRegion used to set. Without this the player freezes until the 6s timeout.
+		int maxX = s.get(JAVA_INT, p + 12);
+		int maxY = s.get(JAVA_INT, p + 16);
+		int maxZ = s.get(JAVA_INT, p + 20);
+		for (int rx = Math.floorDiv(minX, REGION_SIZE); rx <= Math.floorDiv(maxX, REGION_SIZE); rx++) {
+			for (int ry = Math.floorDiv(minY, REGION_SIZE); ry <= Math.floorDiv(maxY, REGION_SIZE); ry++) {
+				for (int rz = Math.floorDiv(minZ, REGION_SIZE); rz <= Math.floorDiv(maxZ, REGION_SIZE); rz++) {
+					KNOWN_REGIONS.add(regionKey(rx, ry, rz));
+				}
+			}
 		}
 	}
 

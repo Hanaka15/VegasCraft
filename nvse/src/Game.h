@@ -47,8 +47,13 @@ namespace vegascraft
 
 		bool inGame_{ false };
 		bool lookInitialized_{ false };
+		bool teleportPending_{ true };
+		bool haveLastFnv_{ false };
+		bool haveLastPuppetFnv_{ false };
+		std::uint32_t teleportSeq_{ 0 };
 		float lookYaw_{ 0.f };
 		float lookPitch_{ 0.f };
-		double debugFnvX_{ 0 }, debugFnvY_{ 0 }, debugFnvZ_{ 128 };
+		double lastFnvX_{ 0 }, lastFnvY_{ 0 }, lastFnvZ_{ 128 };
+		double lastPuppetFnvX_{ 0 }, lastPuppetFnvY_{ 0 }, lastPuppetFnvZ_{ 0 };
 	};
 }

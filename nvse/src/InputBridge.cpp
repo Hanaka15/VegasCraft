@@ -2,13 +2,13 @@
 #include "Controls.h"
 #include "Launcher.h"
 
+#include <atomic>
 #include <cmath>
 
 namespace vegascraft
 {
 	namespace
 	{
-		// DirectInput/Windows VK → SDL scancode (USB HID), matching SkyCraft's map for keys we care about.
 		struct KeyMap
 		{
 			int vk;
@@ -33,9 +33,33 @@ namespace vegascraft
 		float sensitivity = 0.5f;
 		bool logged = false;
 
+		std::atomic<int> scrollAccum{ 0 };
+		HHOOK mouseHook = nullptr;
+
+		LRESULT CALLBACK LowLevelMouseProc(int code, WPARAM wParam, LPARAM lParam)
+		{
+			if (code == HC_ACTION && wParam == WM_MOUSEWHEEL) {
+				const auto* info = reinterpret_cast<MSLLHOOKSTRUCT*>(lParam);
+				scrollAccum.fetch_add(GET_WHEEL_DELTA_WPARAM(info->mouseData), std::memory_order_relaxed);
+			}
+			return ::CallNextHookEx(mouseHook, code, wParam, lParam);
+		}
+
+		void EnsureMouseHook()
+		{
+			if (mouseHook) {
+				return;
+			}
+			mouseHook = ::SetWindowsHookExW(WH_MOUSE_LL, LowLevelMouseProc, ::GetModuleHandleW(nullptr), 0);
+			if (mouseHook) {
+				Launcher::Logf("InputBridge: WH_MOUSE_LL hook installed for scroll");
+			} else {
+				Launcher::Logf("InputBridge: WH_MOUSE_LL hook failed err=%lu", ::GetLastError());
+			}
+		}
+
 		bool IsAllowListedVk(int vk)
 		{
-			// Esc (FNV menu), tilde (console), M (map), J (journal), G (activate) — same idea as SkyCraft.
 			return vk == VK_ESCAPE || vk == VK_OEM_3 || vk == 'M' || vk == 'J' || vk == 'G';
 		}
 	}
@@ -101,13 +125,12 @@ namespace vegascraft
 			haveCursor = false;
 			return;
 		}
+		EnsureMouseHook();
 		if (!logged) {
 			logged = true;
 			Launcher::Logf("InputBridge: polling Win32 input → Minecraft (SkyCraft-style)");
 		}
 
-		// Keyboard edges → MC. Allow-listed keys are still forwarded (MC may use O for pause);
-		// FNV keeps Esc/console/map via DisablePlayerControls not covering them fully — Esc still works.
 		for (const auto& km : kKeys) {
 			const bool down = (::GetAsyncKeyState(km.vk) & 0x8000) != 0;
 			const int idx = km.vk & 0xFF;
@@ -116,13 +139,11 @@ namespace vegascraft
 			}
 			keyDown[idx] = down;
 			if (mode_ != Mode::McScreen && IsAllowListedVk(km.vk) && km.vk != 'O') {
-				// Leave Esc/~/M/J/G for FNV; still don't send G to MC as place.
 				continue;
 			}
 			Push(link, proto::kInKey, km.sdl, down ? 1 : 0);
 		}
 
-		// Mouse buttons: 1 L, 3 R, 2 M (SDL)
 		static const int vks[] = { VK_LBUTTON, VK_RBUTTON, VK_MBUTTON, VK_XBUTTON1, VK_XBUTTON2 };
 		static const std::uint16_t sdlBtn[] = { 1, 3, 2, 4, 5 };
 		for (int i = 0; i < 5; ++i) {
@@ -134,6 +155,7 @@ namespace vegascraft
 			Push(link, proto::kInMouseButton, sdlBtn[i], down ? 1 : 0);
 		}
 
+		pendingScroll_ += scrollAccum.exchange(0, std::memory_order_relaxed);
 		if (pendingScroll_ != 0) {
 			Push(link, proto::kInScroll, 0, pendingScroll_);
 			pendingScroll_ = 0;
@@ -149,14 +171,6 @@ namespace vegascraft
 			}
 			lastCursor = cur;
 			haveCursor = true;
-		}
-
-		// Mouse wheel: Raw Input if available; also eat via GetMessage peek for WM_MOUSEWHEEL on our HWND.
-		MSG msg{};
-		HWND fg = ::GetForegroundWindow();
-		while (fg && ::PeekMessageW(&msg, fg, WM_MOUSEWHEEL, WM_MOUSEWHEEL, PM_REMOVE)) {
-			const int delta = GET_WHEEL_DELTA_WPARAM(msg.wParam);
-			Push(link, proto::kInScroll, 0, delta);
 		}
 
 		(void)sensitivity;
