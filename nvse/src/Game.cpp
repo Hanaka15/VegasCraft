@@ -73,7 +73,6 @@ namespace vegascraft
 		// Minecraft movement is authoritative (SkyCraft). Console SetPos lags badly under Proton,
 		// so never treat "FNV position != MC feet" as a world teleport — that stormed teleportSeq
 		// every 1–2s, froze MC, and dropped the player through the floor.
-		const bool arriving = haveMc && mcInWorld && mc.teleportAck != teleportSeq_;
 		const bool puppet = inGame_ && mcInWorld && haveMc && mc.teleportAck == teleportSeq_;
 
 		if (teleportPending_ && inGame_ && haveLastFnv_) {
