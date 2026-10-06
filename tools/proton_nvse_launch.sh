@@ -89,10 +89,21 @@ force_display_prefs() {
 	local f
 	for f in "$docs/FalloutPrefs.ini" "$docs/Fallout.ini"; do
 		[[ -f "$f" ]] || continue
-		sed -i \
-			-e 's/^bFull Screen=.*/bFull Screen=0/' \
-			-e 's/^iPresentInterval=.*/iPresentInterval=0/' \
-			"$f" || true
+		python3 - "$f" <<'PY'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1])
+raw = p.read_bytes()
+nl = b"\r\n" if b"\r\n" in raw else b"\n"
+out = []
+for line in raw.decode("utf-8", "replace").splitlines():
+    if line.startswith("bFull Screen="):
+        out.append("bFull Screen=0")
+    elif line.startswith("iPresentInterval="):
+        out.append("iPresentInterval=0")
+    else:
+        out.append(line)
+p.write_bytes(nl.join(x.encode() for x in out) + nl)
+PY
 		log "Windowed prefs: $f"
 	done
 }
