@@ -42,6 +42,10 @@ namespace vegascraft
 		lookInitialized_ = false;
 		teleportPending_ = true;
 		haveLastPuppetFnv_ = false;
+		mcLinkedSticky_ = false;
+		safeHostY_ = 0;
+		haveSafeHostY_ = false;
+		puppet_.ResetFallGuard();
 		Controls::SetMinecraftOwnsPlayer(false);
 		exporter_.BumpEpoch();
 		context_.OnCellChange(0x000DA726 /* WastelandNV placeholder */, false);
@@ -70,9 +74,6 @@ namespace vegascraft
 			haveLastFnv_ = true;
 		}
 
-		// Minecraft movement is authoritative (SkyCraft). Console SetPos lags badly under Proton,
-		// so never treat "FNV position != MC feet" as a world teleport — that stormed teleportSeq
-		// every 1–2s, froze MC, and dropped the player through the floor.
 		const bool puppet = inGame_ && mcInWorld && haveMc && mc.teleportAck == teleportSeq_;
 
 		if (teleportPending_ && inGame_ && haveLastFnv_) {
@@ -82,17 +83,21 @@ namespace vegascraft
 			lookPitch_ = coords::FnvPitchToMc(fnvPitchDeg);
 			lookInitialized_ = true;
 			const auto fnvMc = coords::FnvToMc(lastFnvX_, lastFnvY_, lastFnvZ_);
+			safeHostY_ = fnvMc.y;
+			haveSafeHostY_ = true;
 			Launcher::Logf(
 				"teleportSeq=%u → MC (%.1f, %.1f, %.1f) from FNV (%.0f, %.0f, %.0f)",
 				teleportSeq_, fnvMc.x, fnvMc.y, fnvMc.z, lastFnvX_, lastFnvY_, lastFnvZ_);
 		}
 
+		// Stay owning while in-game as soon as MC has been in the world once. Brief link/heartbeat
+		// flaps must not hand movement back to FNV (that was "I'm using Fallout movement").
 		if (inGame_ && mcInWorld) {
 			mcLinkedSticky_ = true;
 			ownsMisses_ = 0;
-		} else if (haveMc && !mcInWorld) {
+		} else if (haveMc && !mcInWorld && !inGame_) {
 			mcLinkedSticky_ = false;
-		} else if (!haveMc && mcLinkedSticky_ && ++ownsMisses_ > 90) {
+		} else if (!haveMc && mcLinkedSticky_ && ++ownsMisses_ > 300) {
 			mcLinkedSticky_ = false;
 		}
 		const bool owns = inGame_ && mcLinkedSticky_;
@@ -122,13 +127,18 @@ namespace vegascraft
 			camera_.UpdateLook(lookYaw_, lookPitch_);
 		}
 
-		// HostState.pos: while Minecraft drives the player, report MC feet (SkyCraft writes the
-		// host body after SetPosition — our console SetPos lags, so echo MC instead of stale FNV).
 		double hostX, hostY, hostZ;
 		if (puppet && haveMc) {
 			hostX = mc.x;
 			hostY = mc.y;
 			hostZ = mc.z;
+			// Never publish a void-fall back to Minecraft as HostState (re-teleports to y=-500).
+			if (haveSafeHostY_ && hostY < safeHostY_ - 32.0) {
+				hostY = safeHostY_;
+			} else if (!haveSafeHostY_ || hostY > safeHostY_ - 2.0) {
+				safeHostY_ = hostY;
+				haveSafeHostY_ = true;
+			}
 		} else {
 			const auto fnvMc = coords::FnvToMc(
 				haveLastFnv_ ? lastFnvX_ : 0.0,
@@ -137,6 +147,10 @@ namespace vegascraft
 			hostX = fnvMc.x;
 			hostY = fnvMc.y;
 			hostZ = fnvMc.z;
+			if (!haveSafeHostY_) {
+				safeHostY_ = hostY;
+				haveSafeHostY_ = true;
+			}
 		}
 
 		proto::HostState host{};
@@ -162,22 +176,14 @@ namespace vegascraft
 		link_.WriteHostState(host);
 
 		puppet_.Update(link_);
-		if (puppet && haveMc) {
-			const auto pup = coords::McToFnv(mc.x, mc.y, mc.z);
-			lastPuppetFnvX_ = pup.x;
-			lastPuppetFnvY_ = pup.y;
-			lastPuppetFnvZ_ = pup.z;
-			haveLastPuppetFnv_ = true;
-		}
 
 		if (haveMc && (mc.flags & proto::kMcSneaking)) {
 			skills_.OnMcSneakTick();
 		}
 
-		// Collision always follows Minecraft feet while linked — that's who is walking.
 		double exportX = lastFnvX_, exportY = lastFnvY_, exportZ = lastFnvZ_;
 		if (haveMc && mcInWorld) {
-			const auto feet = coords::McToFnv(mc.x, mc.y, mc.z);
+			const auto feet = coords::McToFnv(mc.x, std::max(mc.y, haveSafeHostY_ ? safeHostY_ - 2.0 : mc.y), mc.z);
 			exportX = feet.x;
 			exportY = feet.y;
 			exportZ = feet.z;

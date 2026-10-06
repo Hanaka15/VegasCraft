@@ -12,11 +12,13 @@ namespace vegascraft::Controls
 		NVSEConsoleInterface* g_console = nullptr;
 		bool g_owns = false;
 		bool g_applied = false;
+		int g_reapply = 0;
 
-		// Movement + Pip-Boy + Fighting + POV + Sneak. Looking stays on so the camera
-		// can follow the puppet (disabling Looking freezes the view).
+		// Movement + Looking + Pip-Boy + Fighting + POV + Sneak.
+		// Looking MUST be off while MC owns: we drive yaw/pitch via SetAngle + HostState.
+		// Leaving Looking on fought cursor-recenter and made look feel dead under Wine.
 		constexpr int kFlags =
-			(1 << 0) | (1 << 2) | (1 << 3) | (1 << 4) | (1 << 6);
+			(1 << 0) | (1 << 1) | (1 << 2) | (1 << 3) | (1 << 4) | (1 << 6);
 
 		void RunLine(const char* line)
 		{
@@ -31,6 +33,17 @@ namespace vegascraft::Controls
 				}
 			} __except (EXCEPTION_EXECUTE_HANDLER) {
 			}
+		}
+
+		void ApplyOwns(bool owns)
+		{
+			char buf[96];
+			if (owns) {
+				std::snprintf(buf, sizeof(buf), "DisablePlayerControlsAltEx %d", kFlags);
+			} else {
+				std::snprintf(buf, sizeof(buf), "EnablePlayerControlsAltEx %d", kFlags);
+			}
+			RunLine(buf);
 		}
 	}
 
@@ -50,9 +63,15 @@ namespace vegascraft::Controls
 	void SetMinecraftOwnsPlayer(bool owns)
 	{
 		if (owns == g_owns && g_applied) {
+			// Re-assert periodically — loads / scripts clear AltEx flags.
+			if (owns && ++g_reapply >= 120) {
+				g_reapply = 0;
+				ApplyOwns(true);
+			}
 			return;
 		}
 		g_owns = owns;
+		g_reapply = 0;
 		if (!g_console) {
 			static bool warned = false;
 			if (!warned) {
@@ -61,23 +80,14 @@ namespace vegascraft::Controls
 			}
 			return;
 		}
-		char buf[96];
-		if (owns) {
-			std::snprintf(buf, sizeof(buf), "DisablePlayerControlsAltEx %d", kFlags);
-			RunLine(buf);
-			static int ownLogs = 0;
-			if (ownLogs++ < 3) {
-				Launcher::Logf("Controls: Minecraft owns player (FNV move/weapons/POV off; camera follows puppet)");
-			}
-		} else {
-			std::snprintf(buf, sizeof(buf), "EnablePlayerControlsAltEx %d", kFlags);
-			RunLine(buf);
-			static int freeLogs = 0;
-			if (freeLogs++ < 3) {
-				Launcher::Logf("Controls: FNV owns player again");
-			}
-		}
+		ApplyOwns(owns);
 		g_applied = true;
+		static int logs = 0;
+		if (logs++ < 6) {
+			Launcher::Logf(owns
+				? "Controls: Minecraft owns player (FNV move/look/weapons off)"
+				: "Controls: FNV owns player again");
+		}
 	}
 
 	bool MinecraftOwnsPlayer()
@@ -87,7 +97,6 @@ namespace vegascraft::Controls
 
 	void ApplyLook(float mcYawDeg, float mcPitchDeg)
 	{
-		// Console only — no raw REFR memory writes (wrong offsets crash).
 		const float fnvYawDeg = coords::McYawToFnv(mcYawDeg);
 		const float fnvPitchDeg = coords::McPitchToFnv(mcPitchDeg);
 		char buf[96];

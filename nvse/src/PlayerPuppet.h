@@ -16,6 +16,7 @@ namespace vegascraft
 
 		// Filled by Game hooks when RE is available; until then debug teleport via console/script.
 		void ApplyFnvTransform(double x, double y, double z, float yaw, float pitch);
+		void ResetFallGuard();
 
 	private:
 		bool enabled_{ true };

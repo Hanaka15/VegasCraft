@@ -28,12 +28,11 @@ namespace vegascraft
 		bool mouseDown[5]{};
 		float lookDx = 0.f;
 		float lookDy = 0.f;
-		bool logged = false;
 		bool wasOwning = false;
+		bool haveCenter = false;
+		POINT centerScreen{};
 
 		std::atomic<int> scrollAccum{ 0 };
-		std::atomic<int> rawLookDx{ 0 };
-		std::atomic<int> rawLookDy{ 0 };
 		WNDPROC prevWndProc = nullptr;
 		HWND hookedHwnd = nullptr;
 
@@ -41,26 +40,6 @@ namespace vegascraft
 		{
 			if (msg == WM_MOUSEWHEEL) {
 				scrollAccum.fetch_add(GET_WHEEL_DELTA_WPARAM(wParam), std::memory_order_relaxed);
-			} else if (msg == WM_INPUT) {
-				RAWINPUT raw{};
-				UINT size = sizeof(raw);
-				if (::GetRawInputData(reinterpret_cast<HRAWINPUT>(lParam), RID_INPUT, &raw, &size, sizeof(RAWINPUTHEADER)) >= sizeof(RAWINPUTHEADER)
-					&& raw.header.dwType == RIM_TYPEMOUSE) {
-					const auto flags = raw.data.mouse.usButtonFlags;
-					if (flags & RI_MOUSE_WHEEL) {
-						scrollAccum.fetch_add(static_cast<SHORT>(raw.data.mouse.usButtonData), std::memory_order_relaxed);
-					}
-					// Relative deltas keep working at the screen edge (GetCursorPos does not —
-					// that was capping look at ~90°). Same idea as SkyCraft's mouseInputX/Y.
-					if ((raw.data.mouse.usFlags & MOUSE_MOVE_ABSOLUTE) == 0) {
-						if (raw.data.mouse.lLastX != 0) {
-							rawLookDx.fetch_add(raw.data.mouse.lLastX, std::memory_order_relaxed);
-						}
-						if (raw.data.mouse.lLastY != 0) {
-							rawLookDy.fetch_add(raw.data.mouse.lLastY, std::memory_order_relaxed);
-						}
-					}
-				}
 			}
 			return prevWndProc ? ::CallWindowProcW(prevWndProc, hwnd, msg, wParam, lParam)
 							   : ::DefWindowProcW(hwnd, msg, wParam, lParam);
@@ -108,31 +87,21 @@ namespace vegascraft
 			}
 			prevWndProc = reinterpret_cast<WNDPROC>(::SetWindowLongPtrW(hwnd, GWLP_WNDPROC, reinterpret_cast<LONG_PTR>(InputWndProc)));
 			hookedHwnd = hwnd;
-
-			RAWINPUTDEVICE rid{};
-			rid.usUsagePage = 0x01;
-			rid.usUsage = 0x02;
-			rid.dwFlags = RIDEV_INPUTSINK;
-			rid.hwndTarget = hwnd;
-			if (::RegisterRawInputDevices(&rid, 1, sizeof(rid))) {
-				Launcher::Logf("InputBridge: Raw Input look+scroll on hwnd %p", hwnd);
-			} else {
-				Launcher::Logf("InputBridge: window subclass ok, Raw Input failed err=%lu", ::GetLastError());
-			}
+			Launcher::Logf("InputBridge: WM_MOUSEWHEEL subclass on hwnd %p", hwnd);
 		}
 
-		void RecenterCursor()
+		bool UpdateCenter()
 		{
 			if (!hookedHwnd) {
-				return;
+				return false;
 			}
 			RECT rc{};
 			if (!::GetClientRect(hookedHwnd, &rc)) {
-				return;
+				return false;
 			}
-			POINT mid{ (rc.left + rc.right) / 2, (rc.top + rc.bottom) / 2 };
-			::ClientToScreen(hookedHwnd, &mid);
-			::SetCursorPos(mid.x, mid.y);
+			centerScreen = { (rc.left + rc.right) / 2, (rc.top + rc.bottom) / 2 };
+			::ClientToScreen(hookedHwnd, &centerScreen);
+			return true;
 		}
 
 		bool IsAllowListedVk(int vk)
@@ -197,8 +166,7 @@ namespace vegascraft
 				Push(link, proto::kInReleaseAll, 0, 0);
 			}
 			wasOwning = false;
-			rawLookDx.store(0, std::memory_order_relaxed);
-			rawLookDy.store(0, std::memory_order_relaxed);
+			haveCenter = false;
 			std::memset(keyDown, 0, sizeof(keyDown));
 			std::memset(mouseDown, 0, sizeof(mouseDown));
 			return;
@@ -206,15 +174,10 @@ namespace vegascraft
 
 		if (!wasOwning) {
 			wasOwning = true;
+			haveCenter = false;
 			std::memset(keyDown, 0, sizeof(keyDown));
 			std::memset(mouseDown, 0, sizeof(mouseDown));
-			rawLookDx.store(0, std::memory_order_relaxed);
-			rawLookDy.store(0, std::memory_order_relaxed);
-			RecenterCursor();
-			Launcher::Logf("InputBridge: Minecraft owns — Raw Input look (SkyCraft-style)");
-		}
-		if (!logged) {
-			logged = true;
+			Launcher::Logf("InputBridge: Minecraft owns — cursor-delta look (Wine-safe)");
 		}
 
 		for (const auto& km : kKeys) {
@@ -247,18 +210,27 @@ namespace vegascraft
 			pendingScroll_ = 0;
 		}
 
-		if (mode_ != Mode::McScreen) {
-			lookDx += static_cast<float>(rawLookDx.exchange(0, std::memory_order_relaxed));
-			lookDy += static_cast<float>(rawLookDy.exchange(0, std::memory_order_relaxed));
-			// Keep the OS cursor centered so absolute fallbacks never pin at the edge.
-			RecenterCursor();
-		} else {
+		if (mode_ == Mode::McScreen) {
+			haveCenter = false;
 			POINT cur{};
 			if (::GetCursorPos(&cur)) {
 				Push(link, proto::kInCursor, 0, cur.x, cur.y);
 			}
-			rawLookDx.store(0, std::memory_order_relaxed);
-			rawLookDy.store(0, std::memory_order_relaxed);
+			return;
+		}
+
+		// FPS mouse: read delta from window center, then warp back. Works under Wine/Proton;
+		// Raw Input relative deltas often do not. Same pattern games use without DirectInput.
+		if (!haveCenter && UpdateCenter()) {
+			::SetCursorPos(centerScreen.x, centerScreen.y);
+			haveCenter = true;
+		} else if (haveCenter) {
+			POINT cur{};
+			if (::GetCursorPos(&cur)) {
+				lookDx += static_cast<float>(cur.x - centerScreen.x);
+				lookDy += static_cast<float>(cur.y - centerScreen.y);
+				::SetCursorPos(centerScreen.x, centerScreen.y);
+			}
 		}
 	}
 }
