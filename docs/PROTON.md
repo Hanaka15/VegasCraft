@@ -40,3 +40,10 @@ VegasCraft applies two workarounds:
 
 Still prefer **GE-Proton 10+** or **Proton Experimental** (Wine ≥ 9.3) for FNV when
 you can — other code paths may still call `NetworkInterface`.
+
+## Display
+
+On multi-monitor Proton setups, **exclusive fullscreen** (`bFull Screen=1`) often
+leaves Fallout running (audio + input) with a window you cannot restore once
+Prism/Java has touched the display. The launch script forces **borderless
+windowed** at 1920×1080 (`bFull Screen=0`) so the FNV window stays visible.
