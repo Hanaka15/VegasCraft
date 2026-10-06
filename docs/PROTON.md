@@ -10,8 +10,9 @@ How that happens:
 2. Launch via Steam + `tools/proton_nvse_launch.sh`:
    - installs ASI Loader (`dinput8.dll` + `nvse_steam_loader.asi`) for xNVSE
    - pre-unpacks Prism into the prefix
-   - runs **one** Proton session on `VegasCraft_boot.cmd`, which starts Prism
-     then `FalloutNV.exe` (MC first for focus; same wineserver)
+   - runs **one** Proton session on `VegasCraft_boot.cmd`, which starts Prism,
+     waits for `javaw` with Wine-safe `ping` delays (not `timeout`), then
+     starts `FalloutNV.exe` (MC first for focus; same wineserver)
    - sets `bStartWithHost=0` so the plugin does not launch a second Prism
 3. Never use a second Linux `proton run` for Prism — Proton then hangs on
    `wineserver -w` and Fallout never starts.

@@ -64,8 +64,19 @@ namespace vegascraft
 			host.posY = mcPos.y;
 			host.posZ = mcPos.z;
 		}
-		host.viewportW = 1280;
-		host.viewportH = 720;
+		// Match the real game window / fullscreen resolution for overlay sizing.
+		RECT rc{};
+		HWND hwnd = ::GetActiveWindow();
+		if (!hwnd) {
+			hwnd = ::GetForegroundWindow();
+		}
+		if (hwnd && ::GetClientRect(hwnd, &rc) && rc.right > 0 && rc.bottom > 0) {
+			host.viewportW = static_cast<std::uint32_t>(rc.right);
+			host.viewportH = static_cast<std::uint32_t>(rc.bottom);
+		} else {
+			host.viewportW = static_cast<std::uint32_t>(::GetSystemMetrics(SM_CXSCREEN));
+			host.viewportH = static_cast<std::uint32_t>(::GetSystemMetrics(SM_CYSCREEN));
+		}
 		host.gameHour = 12.0f;
 		link_.WriteHostState(host);
 
